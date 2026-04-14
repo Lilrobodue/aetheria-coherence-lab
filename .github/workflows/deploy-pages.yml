@@ -22,6 +22,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify src/ contents
+        run: |
+          echo "=== Files in src/ ==="
+          ls -la src/
+          echo "=== Total files ==="
+          find src/ -type f | wc -l
+          find src/ -type f | head -20
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
