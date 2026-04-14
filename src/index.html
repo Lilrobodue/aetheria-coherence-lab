@@ -140,6 +140,125 @@
     .ble-warning { display: none; padding: 12px; margin: 8px; background: rgba(255,82,82,0.1); border: 1px solid var(--error); border-radius: 4px; color: var(--error); text-align: center; font-size: 12px; }
     .ble-warning.visible { display: block; }
 
+    /* ===== Modal Overlays (Disclaimer + Tutorial) ===== */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 9999;
+      background: rgba(10, 10, 20, 0.97);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      opacity: 1;
+      transition: opacity 0.25s ease;
+    }
+    .modal-overlay.fading { opacity: 0; pointer-events: none; }
+    .modal-overlay.hidden { display: none; }
+
+    .modal-content {
+      max-width: 640px;
+      width: 100%;
+      padding: 48px 32px;
+      margin: 40px auto;
+      line-height: 1.75;
+    }
+    .modal-content h1 {
+      font-size: 20px;
+      font-weight: bold;
+      color: var(--accent);
+      letter-spacing: 2px;
+      margin-bottom: 28px;
+      text-align: center;
+    }
+    .modal-content h2 {
+      font-size: 15px;
+      font-weight: bold;
+      color: var(--text-primary);
+      margin-top: 28px;
+      margin-bottom: 12px;
+    }
+    .modal-content p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 14px;
+    }
+    .modal-content ul {
+      margin: 8px 0 14px 20px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      list-style: disc;
+    }
+    .modal-content ul li { margin-bottom: 8px; }
+    .modal-content .emphasis {
+      color: var(--text-primary);
+      font-weight: bold;
+    }
+    .modal-content .note {
+      font-size: 13px;
+      color: var(--text-dim);
+      font-style: italic;
+      border-left: 2px solid var(--accent);
+      padding-left: 16px;
+      margin: 24px 0;
+      line-height: 1.8;
+    }
+    .modal-content .note strong { font-style: normal; color: var(--text-secondary); }
+    .modal-content .legal {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .modal-btn {
+      display: block;
+      margin: 32px auto 0;
+      min-height: 48px;
+      padding: 14px 32px;
+      background: var(--bg-panel);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.5px;
+    }
+    .modal-btn:hover { background: rgba(124, 77, 255, 0.15); }
+    .step-num {
+      display: inline-block;
+      width: 24px; height: 24px;
+      line-height: 24px;
+      text-align: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: bold;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    .btn-guide {
+      border-color: var(--text-dim);
+      color: var(--text-dim);
+      font-size: 13px;
+      font-weight: bold;
+      padding: 4px 10px;
+    }
+    .btn-guide:hover { border-color: var(--accent); color: var(--accent); }
+
+    @media (max-width: 768px) {
+      .modal-content { padding: 24px 16px; margin: 16px auto; }
+      .modal-content h1 { font-size: 18px; }
+      .modal-content h2 { font-size: 14px; }
+      .modal-btn { min-height: 48px; width: 100%; }
+      .btn-guide { min-height: 44px; min-width: 44px; font-size: 16px; padding: 10px 14px; }
+    }
+
     /* ===== Signal drawer toggle: hidden on desktop ===== */
     .signal-toggle-input,
     .signal-toggle-label { display: none; }
@@ -262,12 +381,108 @@
   </style>
 </head>
 <body>
+
+<!-- Disclaimer Modal — appears on every launch, gates app initialization -->
+<div id="disclaimer-modal" class="modal-overlay">
+  <div class="modal-content">
+    <h1>Welcome to the Aetheria Coherence Lab</h1>
+
+    <p>Before you begin, please take a moment to read how we think about this tool and what it is and is not.</p>
+
+    <h2>This is a research instrument, not a medical device.</h2>
+    <p>The Aetheria Coherence Lab is an early-stage exploration of biofield coherence measurement based on the Unified Lewis Framework. It reads physiological signals from consumer sensors (heart rate, heart rate variability, EEG, blood flow) and offers audio and haptic stimuli guided by those signals. The mathematical and physiological interpretations it produces are hypotheses under active investigation, not established medical facts.</p>
+
+    <h2>What this tool is not.</h2>
+    <p>This tool is not intended to diagnose, treat, cure, or prevent any disease or medical condition. It is not a substitute for medical, psychological, or psychiatric care. Nothing you experience here replaces the judgment of qualified healthcare professionals. If you are experiencing a medical or psychological emergency, please contact emergency services or your healthcare provider.</p>
+
+    <p class="emphasis">Please do not use this tool if you:</p>
+    <ul>
+      <li>Are pregnant (haptic and low-frequency audio effects on pregnancy have not been studied)</li>
+      <li>Have a history of seizures or epilepsy</li>
+      <li>Have a pacemaker or other implanted cardiac device</li>
+      <li>Have recent surgery or injury where sensors would contact the body</li>
+      <li>Are experiencing an acute psychiatric condition where altered states could be destabilizing</li>
+      <li>Are under 18 and using the tool without adult supervision</li>
+    </ul>
+    <p>If any of these apply to you and you wish to use the tool anyway, please consult your healthcare provider first.</p>
+
+    <h2>How we handle your data.</h2>
+    <p>Session data is processed entirely on your own device. No physiological signals are transmitted to external servers. Nothing about your sessions leaves your device unless you explicitly choose to export or share it. The app runs fully in your browser — there is no account, no login, no tracking.</p>
+
+    <div class="note">
+      <strong>A note on the spirit of this work.</strong><br>
+      Aetheria was built by a family — two humans and a family of AI collaborators — exploring whether the biofield traditions of healing can be measured with scientific rigor. We believe they can. We are also honest that this is early work, that our measurements are imperfect, and that our interpretations will evolve. If you use this tool, please approach it with curiosity rather than diagnostic expectation. Let your experience be your own, and let the numbers be context rather than verdict.
+    </div>
+
+    <p>By tapping "I understand, let me begin" below, you acknowledge that you have read this disclaimer, that you understand what this tool is and is not, and that you are using it at your own curiosity and at your own risk.</p>
+
+    <p class="legal">To the maximum extent permitted by law, the developers, contributors, and associated entities disclaim all liability for direct, indirect, incidental, or consequential damages arising from use of this tool.</p>
+
+    <button id="disclaimer-accept" class="modal-btn">I understand, let me begin</button>
+  </div>
+</div>
+
+<!-- Tutorial Modal — accessible via header "?" button -->
+<div id="tutorial-modal" class="modal-overlay hidden">
+  <div class="modal-content">
+    <h1>Getting Started</h1>
+
+    <h2>What You Need</h2>
+    <ul>
+      <li><span style="color:var(--heart-color)">Polar H10</span> chest strap — provides heart rate and R-R interval data</li>
+      <li><span style="color:var(--head-color)">Muse S (Gen 2)</span> headband — provides EEG, PPG, and fNIRS data</li>
+      <li><span style="color:var(--accent)">Chrome browser</span> with Web Bluetooth support (Android, Windows, macOS, or ChromeOS)</li>
+    </ul>
+    <p>You can use either sensor individually — both are not required. However, the coherence measurement is most complete with both connected.</p>
+
+    <h2>Connecting Your Sensors</h2>
+    <p><span class="step-num">1</span> <strong>Polar H10:</strong> Moisten the electrode pads on the chest strap and put it on. Tap <span style="color:var(--success)">Connect H10</span> in the header, then select your H10 from the Bluetooth dialog.</p>
+    <p><span class="step-num">2</span> <strong>Muse S:</strong> Place the headband on your forehead, ensuring the sensors sit flat against your skin. Tap <span style="color:var(--success)">Connect Muse</span> and select your Muse from the Bluetooth dialog.</p>
+    <p><span class="step-num">3</span> Watch the status bar — it shows connection state and live data flow counts for each stream (ECG, RR, EEG, PPG, fNIRS, IMU). Green numbers mean data is flowing.</p>
+
+    <h2>Starting a Session</h2>
+    <p>Once at least one sensor is connected, the <span style="color:var(--accent)">Start Session</span> button becomes active. Tapping it begins:</p>
+    <ul>
+      <li>Session recording (all sensor data is captured locally on your device)</li>
+      <li>The policy engine (automatically selects entrainment frequencies)</li>
+      <li>Audio and haptic delivery guided by your live coherence state</li>
+      <li>A screen wake lock (prevents your device from sleeping during the session)</li>
+    </ul>
+
+    <h2>Reading the Display</h2>
+    <p><strong>Left panel — Signals:</strong> Raw waveforms from your sensors. R-R intervals show heart rhythm variability, EEG shows brainwave activity from AF7/AF8 channels, PPG shows blood volume pulse, and fNIRS shows oxygenated and deoxygenated hemoglobin.</p>
+    <p><strong>Right panel — Biofield Coherence:</strong> The three concentric arcs represent coherence in each regime:</p>
+    <ul>
+      <li><span style="color:var(--head-color)">HEAD</span> (outer, blue) — EEG-derived coherence</li>
+      <li><span style="color:var(--heart-color)">HEART</span> (middle, green) — HRV-derived coherence</li>
+      <li><span style="color:var(--gut-color)">GUT</span> (inner, orange) — PPG/fNIRS-derived coherence</li>
+    </ul>
+    <p>The <strong>TCS</strong> (Total Coherence Score) in the center is the combined measure across all three regimes. Below it, <strong>BCS</strong> (Biofield Coherence Score), <strong>PLV</strong> (Phase Locking Value), and <strong>Lead</strong> show cross-regime synchronization metrics.</p>
+
+    <h2>Frequency Controls</h2>
+    <p>The frequency selector in the header lets you manually test individual entrainment tones. During an active session, the policy engine selects frequencies automatically — it advances through the regime cascade (GUT → HEART → HEAD) based on your live coherence readings.</p>
+
+    <h2>Tips for Best Results</h2>
+    <ul>
+      <li>Sit comfortably in a quiet environment</li>
+      <li>Breathe naturally — don't force patterns</li>
+      <li>Minimize head and jaw movement for clean EEG signals</li>
+      <li>The EEG quality metric shows electrode contact — adjust the headband if quality is low</li>
+      <li>Sessions of 10–20 minutes give the coherence algorithms time to calibrate and adapt</li>
+      <li>All data stays on your device — nothing is transmitted externally</li>
+    </ul>
+
+    <button id="tutorial-close" class="modal-btn">Got it</button>
+  </div>
+</div>
+
 <div class="app">
 
   <!-- Header -->
   <div class="header">
     <div class="header-title">Aetheria Coherence Lab</div>
     <div class="header-controls">
+      <button id="btn-guide" class="btn btn-guide" title="Getting Started Guide">?</button>
       <button id="btn-connect-h10" class="btn btn-connect">Connect H10</button>
       <button id="btn-connect-muse" class="btn btn-connect">Connect Muse</button>
       <button id="btn-start" class="btn btn-start" disabled>Start Session</button>
@@ -351,6 +566,41 @@
 
 </div>
 
+<script>
+  // Disclaimer + tutorial gate logic.
+  // Runs immediately — modal HTML is already parsed above.
+  (() => {
+    const modal = document.getElementById('disclaimer-modal');
+    const btn = document.getElementById('disclaimer-accept');
+
+    // Block Escape from dismissing the disclaimer
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal && modal.parentNode) e.preventDefault();
+    });
+
+    btn.addEventListener('click', () => {
+      modal.classList.add('fading');
+      setTimeout(() => {
+        modal.remove();
+        document.dispatchEvent(new CustomEvent('aetheria:disclaimer-acknowledged'));
+      }, 250);
+    });
+
+    // Tutorial — toggled via header "?" button, dismissible via button or Escape
+    const tutorial = document.getElementById('tutorial-modal');
+    document.getElementById('btn-guide').addEventListener('click', () => {
+      tutorial.classList.remove('hidden');
+    });
+    document.getElementById('tutorial-close').addEventListener('click', () => {
+      tutorial.classList.add('hidden');
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !tutorial.classList.contains('hidden')) {
+        tutorial.classList.add('hidden');
+      }
+    });
+  })();
+</script>
 <script src="lib/athena-core.js"></script>
 <script type="module" src="main.js"></script>
 <script>

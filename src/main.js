@@ -468,5 +468,7 @@ function initFrequencySelector() {
 }
 
 // --- Boot ---
+// Gated on disclaimer acknowledgment — nothing initializes until the user
+// taps "I understand, let me begin" on the disclaimer modal.
 
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('aetheria:disclaimer-acknowledged', init);
