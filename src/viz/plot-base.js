@@ -147,13 +147,13 @@ export class PlotBase {
         ctx.font = 'bold 12px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
-        ctx.fillText(options.title, 10, 18);
+        ctx.fillText(options.title, margin.left, margin.top - 8);
       }
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.font = '13px monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.font = '14px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('Waiting for data\u2026', w / 2, h / 2);
+      ctx.fillText('Waiting for data\u2026', margin.left + plotW / 2, margin.top + plotH / 2);
       ctx.textBaseline = 'alphabetic';
       return;
     }
