@@ -41,6 +41,8 @@ const app = {
   sessionActive: false
 };
 
+let wakeLockSentinel = null;
+
 // Expose app for console debugging
 window.aetheria = app;
 
@@ -164,6 +166,13 @@ async function init() {
   document.getElementById('btn-connect-muse').addEventListener('click', connectMuse);
   document.getElementById('btn-start').addEventListener('click', toggleSession);
 
+  // Re-acquire wake lock when tab becomes visible again
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && app.sessionActive) {
+      await acquireWakeLock();
+    }
+  });
+
   // Handle window resize
   window.addEventListener('resize', () => {
     app.signalPanel.resize();
@@ -238,6 +247,31 @@ function updateStartButton() {
   btn.disabled = !(app.polarH10.isConnected || app.museAthena.isConnected);
 }
 
+// --- Screen Wake Lock (prevents sleep during active sessions) ---
+
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) {
+    console.warn('[WakeLock] API not supported — screen may sleep during session');
+    return;
+  }
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    console.log('[WakeLock] Screen wake lock acquired');
+    wakeLockSentinel.addEventListener('release', () => {
+      console.log('[WakeLock] Screen wake lock released');
+    });
+  } catch (err) {
+    console.warn('[WakeLock] Could not acquire:', err.message);
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLockSentinel) {
+    await wakeLockSentinel.release();
+    wakeLockSentinel = null;
+  }
+}
+
 // --- Session Control ---
 
 async function toggleSession() {
@@ -257,6 +291,7 @@ async function toggleSession() {
     app.policy.start();
 
     app.sessionActive = true;
+    await acquireWakeLock();
     app.dashboard.startSession();
     btn.textContent = 'Stop Session';
     btn.style.borderColor = 'var(--error)';
@@ -287,6 +322,7 @@ async function toggleSession() {
       app.recorder = null;
     }
 
+    await releaseWakeLock();
     app.sessionActive = false;
     btn.textContent = 'Start Session';
     btn.style.borderColor = '';
