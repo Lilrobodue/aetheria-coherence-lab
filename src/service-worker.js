@@ -1,6 +1,6 @@
 // Aetheria Coherence Lab — Service Worker
 // Cache-first for modules/assets, network-first for HTML
-const CACHE_NAME = 'aetheria-v1.4.0';
+const CACHE_NAME = 'aetheria-v1.5.0';
 
 const APP_SHELL = [
   './',
