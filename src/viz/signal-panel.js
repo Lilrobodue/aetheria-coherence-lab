@@ -152,6 +152,11 @@ export class SignalPanel {
 
       this._plots.push({ plot, config, canvas, wrapper });
     }
+
+    // Recalibrate all canvases now that all wrappers exist in the DOM.
+    // Each PlotBase constructor sized its canvas when it was the only
+    // child (100% height) — now flex distributes space evenly (25% each).
+    requestAnimationFrame(() => this.resize());
   }
 
   start() {
