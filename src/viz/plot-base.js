@@ -141,10 +141,20 @@ export class PlotBase {
     ctx.fillRect(0, 0, w, h);
 
     if (this._series.length === 0 || this._series.every(s => s.count === 0)) {
-      ctx.fillStyle = options.labelColor;
-      ctx.font = '12px monospace';
+      // Show plot title even while waiting so panels are identifiable
+      if (options.title) {
+        ctx.fillStyle = options.titleColor;
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(options.title, 10, 18);
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.font = '13px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('Waiting for data...', w / 2, h / 2);
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Waiting for data\u2026', w / 2, h / 2);
+      ctx.textBaseline = 'alphabetic';
       return;
     }
 
