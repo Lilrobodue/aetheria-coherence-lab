@@ -1,0 +1,13 @@
+{
+  "name": "aetheria-polar-bridge",
+  "version": "1.0.0",
+  "description": "Native BLE bridge for Polar H10 ECG streaming via WebSocket",
+  "main": "ecg-bridge.js",
+  "scripts": {
+    "start": "node ecg-bridge.js"
+  },
+  "dependencies": {
+    "@stoprocent/noble": "^1.15.0",
+    "ws": "^8.16.0"
+  }
+}

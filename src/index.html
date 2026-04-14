@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Aetheria Coherence Lab</title>
+  <style>
+    :root {
+      --bg-primary: #0a0a14;
+      --bg-secondary: #0d0d1a;
+      --bg-panel: #111128;
+      --border: rgba(255,255,255,0.08);
+      --text-primary: rgba(255,255,255,0.9);
+      --text-secondary: rgba(255,255,255,0.6);
+      --text-dim: rgba(255,255,255,0.35);
+      --gut-color: #ff9800;
+      --heart-color: #4caf50;
+      --head-color: #42a5f5;
+      --accent: #7c4dff;
+      --success: #00e676;
+      --warning: #ffc107;
+      --error: #ff5252;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      font-family: 'Consolas', 'SF Mono', 'Fira Code', monospace;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 16px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .header-title { font-size: 13px; font-weight: bold; letter-spacing: 2px; color: var(--accent); }
+    .header-controls { display: flex; gap: 8px; align-items: center; }
+    .btn {
+      padding: 5px 12px; border: 1px solid var(--border); border-radius: 3px;
+      background: var(--bg-panel); color: var(--text-primary); font-family: inherit;
+      font-size: 11px; cursor: pointer; transition: all 0.2s;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn.btn-connect { border-color: var(--success); color: var(--success); }
+    .btn.btn-connect.connected { background: rgba(0,230,118,0.15); }
+    .btn.btn-start { border-color: var(--accent); color: var(--accent); }
+
+    /* Info bar: status + data flow + session in one row */
+    .info-bar {
+      display: flex; align-items: center; gap: 16px; padding: 4px 16px;
+      background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+      font-size: 10px; color: var(--text-secondary); flex-shrink: 0; flex-wrap: wrap;
+    }
+    .sensor-status { display: flex; align-items: center; gap: 4px; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+    .dot-streaming { background: var(--success); }
+    .dot-connecting { background: var(--warning); animation: pulse 1s infinite; }
+    .dot-error { background: var(--error); }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+    .info-sep { color: var(--border); }
+    .session-item .label { color: var(--text-dim); }
+    .session-item .value { color: var(--text-primary); font-weight: bold; }
+
+    /* Main grid: fills remaining space */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      flex: 1;
+      min-height: 0;
+    }
+
+    .panel {
+      background: var(--bg-primary);
+      padding: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-title {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+      color: var(--text-dim); margin-bottom: 6px; padding-bottom: 4px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+
+    /* Signal panel: fill available space evenly */
+    .signal-panel { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; }
+    .signal-plot-wrapper { flex: 1; min-height: 0; }
+    .signal-canvas { width: 100%; height: 100%; display: block; }
+
+    /* Right column layout */
+    .right-col { display: flex; flex-direction: column; gap: 1px; }
+    .coherence-section { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .coherence-section .panel-title { flex-shrink: 0; }
+    #coherence-container { flex: 1; min-height: 0; }
+
+    /* Metrics row */
+    .metrics-row { display: flex; gap: 6px; flex-shrink: 0; padding: 6px 0; }
+    .metric-card {
+      flex: 1; background: var(--bg-secondary); border: 1px solid var(--border);
+      border-radius: 3px; padding: 6px; text-align: center;
+    }
+    .metric-label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+    .metric-value { font-size: 18px; font-weight: bold; margin-top: 2px; }
+    .metric-unit { font-size: 8px; color: var(--text-dim); }
+
+    /* Transition log */
+    .log-section { flex-shrink: 0; max-height: 120px; overflow-y: auto; }
+    .log-entry { display: flex; gap: 8px; padding: 2px 0; font-size: 10px; }
+    .log-time { color: var(--text-dim); min-width: 40px; }
+    .log-msg { color: var(--text-secondary); }
+    .log-sensor .log-msg { color: var(--heart-color); }
+    .log-system .log-msg { color: var(--accent); }
+    .log-error .log-msg { color: var(--error); }
+
+    .ble-warning { display: none; padding: 12px; margin: 8px; background: rgba(255,82,82,0.1); border: 1px solid var(--error); border-radius: 4px; color: var(--error); text-align: center; font-size: 12px; }
+    .ble-warning.visible { display: block; }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">Aetheria Coherence Lab</div>
+    <div class="header-controls">
+      <button id="btn-connect-h10" class="btn btn-connect">Connect H10</button>
+      <button id="btn-connect-muse" class="btn btn-connect">Connect Muse</button>
+      <button id="btn-start" class="btn btn-start" disabled>Start Session</button>
+      <span style="margin-left:8px;border-left:1px solid rgba(255,255,255,0.1);padding-left:8px;" id="freq-selector"></span>
+    </div>
+  </div>
+
+  <div id="ble-warning" class="ble-warning">Web Bluetooth not available. Use Chrome or Edge.</div>
+
+  <!-- Combined info bar -->
+  <div class="info-bar">
+    <div id="status-polar-h10" class="sensor-status">
+      <span class="status-dot dot-disconnected"></span>
+      <span>H10: <span class="status-text">OFF</span></span>
+    </div>
+    <div id="status-muse-s-athena" class="sensor-status">
+      <span class="status-dot dot-disconnected"></span>
+      <span>Muse: <span class="status-text">OFF</span></span>
+    </div>
+    <span class="info-sep">|</span>
+    <span id="data-flow">--</span>
+    <span class="info-sep">|</span>
+    <span class="session-item"><span class="label">STATE:</span> <span class="value" id="current-state">IDLE</span></span>
+    <span class="session-item"><span class="label">Session:</span> <span class="value" id="session-time">00:00</span></span>
+    <span class="session-item"><span class="label">In state:</span> <span class="value" id="state-time">00:00</span></span>
+    <span id="current-frequency" style="display:none"></span>
+    <span id="cascade-info" style="display:none"></span>
+  </div>
+
+  <!-- Main content -->
+  <div class="main-grid">
+
+    <!-- Left: Signals -->
+    <div class="panel">
+      <div class="panel-title">Signals</div>
+      <div id="signal-container" class="signal-panel"></div>
+    </div>
+
+    <!-- Right: Coherence + Metrics + Log -->
+    <div class="panel right-col">
+      <div class="coherence-section">
+        <div class="panel-title">Biofield Coherence</div>
+        <div id="coherence-container"></div>
+      </div>
+
+      <div class="metrics-row">
+        <div class="metric-card">
+          <div class="metric-label">Heart Rate</div>
+          <div class="metric-value" id="metric-hr" style="color:var(--heart-color)">--</div>
+          <div class="metric-unit">bpm</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">R-R</div>
+          <div class="metric-value" id="metric-rr" style="color:var(--heart-color)">--</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">EEG</div>
+          <div class="metric-value" id="metric-eeg-quality" style="color:var(--head-color)">--</div>
+          <div class="metric-unit">quality</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">PPG</div>
+          <div class="metric-value" id="metric-ppg" style="color:var(--gut-color)">--</div>
+          <div class="metric-unit">HR</div>
+        </div>
+      </div>
+
+      <div class="panel-title">Log</div>
+      <div class="log-section" id="transition-log">
+        <div class="log-entry log-system">
+          <span class="log-time">--:--</span>
+          <span class="log-msg">Ready. Connect sensors to begin.</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="lib/athena-core.js"></script>
+<script type="module" src="main.js"></script>
+</body>
+</html>

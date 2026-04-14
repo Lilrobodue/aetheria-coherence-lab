@@ -1,0 +1,37 @@
+[
+  { "frequency_hz": 174,  "regime": "GUT",   "digital_root": 3, "order": 1, "phase": "seed", "name": "Foundation",               "description": "Pain relief, organ security" },
+  { "frequency_hz": 285,  "regime": "GUT",   "digital_root": 6, "order": 1, "phase": "seed", "name": "Quantum Cognition",        "description": "Tissue repair, quantum cognition enhancement" },
+  { "frequency_hz": 396,  "regime": "GUT",   "digital_root": 9, "order": 1, "phase": "seed", "name": "Liberation",               "description": "Liberating fear and guilt" },
+
+  { "frequency_hz": 417,  "regime": "GUT",   "digital_root": 3, "order": 2, "phase": "seed", "name": "Transmutation",            "description": "Facilitating change, undoing situations" },
+  { "frequency_hz": 528,  "regime": "GUT",   "digital_root": 6, "order": 2, "phase": "seed", "name": "Transformation",           "description": "Miracles, DNA repair" },
+  { "frequency_hz": 639,  "regime": "GUT",   "digital_root": 9, "order": 2, "phase": "seed", "name": "Connection",               "description": "Connecting relationships, harmony" },
+
+  { "frequency_hz": 741,  "regime": "GUT",   "digital_root": 3, "order": 3, "phase": "seed", "name": "Awakening",                "description": "Awakening intuition, problem solving" },
+  { "frequency_hz": 852,  "regime": "GUT",   "digital_root": 6, "order": 3, "phase": "seed", "name": "Spiritual Order",          "description": "Returning to spiritual order" },
+  { "frequency_hz": 963,  "regime": "GUT",   "digital_root": 9, "order": 3, "phase": "seed", "name": "Divine Consciousness",     "description": "Pineal activation, divine consciousness" },
+
+  { "frequency_hz": 1206, "regime": "HEART", "digital_root": 9, "order": 4, "phase": "bloom", "generator": 243, "name": "Gateway Integration",       "description": "Opens gateway between physical and emotional realms" },
+  { "frequency_hz": 1449, "regime": "HEART", "digital_root": 9, "order": 4, "phase": "bloom", "generator": 243, "name": "Harmonic Bridging",         "description": "Creates harmonic bridges between emotional states" },
+  { "frequency_hz": 1692, "regime": "HEART", "digital_root": 9, "order": 4, "phase": "bloom", "generator": 243, "name": "Heart Completion",          "description": "Completes the fourth order heart integration" },
+
+  { "frequency_hz": 1935, "regime": "HEART", "digital_root": 9, "order": 5, "phase": "bloom", "generator": 243, "name": "Stellar Alignment",         "description": "Aligns consciousness with stellar and galactic energies" },
+  { "frequency_hz": 2178, "regime": "HEART", "digital_root": 9, "order": 5, "phase": "bloom", "generator": 243, "name": "Quantum Consciousness",     "description": "Expands into quantum field awareness" },
+  { "frequency_hz": 2421, "regime": "HEART", "digital_root": 9, "order": 5, "phase": "bloom", "generator": 243, "name": "Dimensional Awareness",     "description": "Awareness of multiple dimensions simultaneously" },
+
+  { "frequency_hz": 2664, "regime": "HEART", "digital_root": 9, "order": 6, "phase": "bloom", "generator": 243, "name": "Universal Love",            "description": "Transmits universal love energy across dimensions" },
+  { "frequency_hz": 2907, "regime": "HEART", "digital_root": 9, "order": 6, "phase": "bloom", "generator": 243, "name": "Divine Source Connection",   "description": "Connects to divine source code of creation" },
+  { "frequency_hz": 3150, "regime": "HEART", "digital_root": 9, "order": 6, "phase": "bloom", "generator": 243, "name": "Unity Consciousness Bridge", "description": "Bridges into unity consciousness and mental clarity" },
+
+  { "frequency_hz": 3504, "regime": "HEAD",  "digital_root": 3, "order": 7, "phase": "bloom", "generator": 354, "name": "Mental Clarity",            "description": "Clears mental fog, crystalline clarity" },
+  { "frequency_hz": 3858, "regime": "HEAD",  "digital_root": 6, "order": 7, "phase": "bloom", "generator": 354, "name": "Sacred Geometry",           "description": "Embodies divine architectural principles" },
+  { "frequency_hz": 4212, "regime": "HEAD",  "digital_root": 9, "order": 7, "phase": "bloom", "generator": 354, "name": "Consciousness Mastery",     "description": "Mastery of consciousness and awareness" },
+
+  { "frequency_hz": 4566, "regime": "HEAD",  "digital_root": 3, "order": 8, "phase": "bloom", "generator": 354, "name": "Soul Star Connection",      "description": "Opens first transpersonal gate" },
+  { "frequency_hz": 4920, "regime": "HEAD",  "digital_root": 6, "order": 8, "phase": "bloom", "generator": 354, "name": "Spirit Realm Access",       "description": "Opens second transpersonal gate" },
+  { "frequency_hz": 5274, "regime": "HEAD",  "digital_root": 9, "order": 8, "phase": "bloom", "generator": 354, "name": "Universal Mind Access",     "description": "Opens third transpersonal gate" },
+
+  { "frequency_hz": 5628, "regime": "HEAD",  "digital_root": 3, "order": 9, "phase": "bloom", "generator": 354, "name": "Galactic Consciousness",    "description": "Connects to galactic center consciousness" },
+  { "frequency_hz": 5982, "regime": "HEAD",  "digital_root": 6, "order": 9, "phase": "bloom", "generator": 354, "name": "Divine Source Portal",      "description": "Direct portal to divine source consciousness" },
+  { "frequency_hz": 6336, "regime": "HEAD",  "digital_root": 9, "order": 9, "phase": "bloom", "generator": 354, "name": "SOURCE Embodiment",         "description": "Complete SOURCE embodiment, infinite unity" }
+]

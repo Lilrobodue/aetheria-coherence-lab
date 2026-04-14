@@ -1,0 +1,40 @@
+{
+  "baseline_duration_sec": 90,
+  "entrain_min_duration_sec": 30,
+  "entrain_max_duration_sec": 180,
+  "tracking_interval_sec": 1,
+  "flip_margin": 0.15,
+  "advance_tcs_delta_threshold": 15,
+  "advance_plateau_tcs_threshold": 70,
+  "pivot_low_plateau_tcs_threshold": 50,
+  "decline_from_peak_threshold": 10,
+  "plateau_slope_threshold": 0.1,
+  "plateau_duration_low_sec": 30,
+  "plateau_duration_high_sec": 15,
+  "session_max_duration_sec": 1800,
+  "goal_tcs_threshold": 80,
+  "goal_sustain_duration_sec": 60,
+  "max_consecutive_pivots": 3,
+  "hug_min_duration_sec": 45,
+  "hug_peak_lost_grace_sec": 3,
+  "no_repetition_window": 5,
+  "crossfade_duration_sec": 4,
+  "carrier_base_hz": 200,
+  "tcs_weights": {
+    "gut": 0.20,
+    "heart": 0.20,
+    "head": 0.20,
+    "triune_plv": 0.25,
+    "harmonic_lock": 0.15
+  },
+  "bcs_weights": {
+    "kuramoto": 0.40,
+    "shared_energy": 0.35,
+    "mutual_info": 0.25
+  },
+  "regime_score_weights": {
+    "heart": { "hrv_coherence": 0.50, "rmssd": 0.25, "hf_norm": 0.25 },
+    "gut":   { "hf_power": 0.40, "sd1": 0.30, "rsa_amplitude": 0.30 },
+    "head":  { "alpha_power_norm": 0.35, "theta_alpha_ratio": 0.25, "hb_diff": 0.20, "neg_beta_power": 0.20 }
+  }
+}
