@@ -131,6 +131,13 @@ export class PlotBase {
   }
 
   _draw() {
+    // Sync canvas buffer with current layout dimensions (fixes blurry
+    // text when flex layout wasn't computed at construction time)
+    const rect = this.canvas.getBoundingClientRect();
+    if (Math.abs(rect.width - this._width) > 1 || Math.abs(rect.height - this._height) > 1) {
+      this._setupHiDPI();
+    }
+
     const { ctx, _width: w, _height: h, options } = this;
     const margin = { top: 30, right: 10, bottom: 20, left: 50 };
     const plotW = w - margin.left - margin.right;
