@@ -132,7 +132,7 @@ export class PlotBase {
 
   _draw() {
     const { ctx, _width: w, _height: h, options } = this;
-    const margin = { top: 25, right: 10, bottom: 20, left: 50 };
+    const margin = { top: 30, right: 10, bottom: 20, left: 50 };
     const plotW = w - margin.left - margin.right;
     const plotH = h - margin.top - margin.bottom;
 
@@ -144,13 +144,13 @@ export class PlotBase {
       // Show plot title even while waiting so panels are identifiable
       if (options.title) {
         ctx.fillStyle = options.titleColor;
-        ctx.font = 'bold 12px monospace';
+        ctx.font = 'bold 14px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
-        ctx.fillText(options.title, margin.left, margin.top - 8);
+        ctx.fillText(options.title, margin.left, margin.top - 10);
       }
-      ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.font = '14px monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = '15px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('Waiting for data\u2026', margin.left + plotW / 2, margin.top + plotH / 2);
@@ -229,9 +229,9 @@ export class PlotBase {
     // Title
     if (options.title) {
       ctx.fillStyle = options.titleColor;
-      ctx.font = 'bold 11px monospace';
+      ctx.font = 'bold 14px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(options.title, margin.left, margin.top - 8);
+      ctx.fillText(options.title, margin.left, margin.top - 10);
     }
 
     // Draw each series from pre-fetched visible data
