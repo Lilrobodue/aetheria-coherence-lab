@@ -111,15 +111,18 @@ export class MuseAthena {
       }
       batch[channelName] = values;
 
-      // Update contact quality from last sample
-      const last = Math.abs(values[nSamples - 1]);
-      if (last > 0.1 && last < 500) {
-        this._channelQuality[channelName] = Math.min(1,
-          this._channelQuality[channelName] * 0.99 + 0.01);
-      } else {
-        this._channelQuality[channelName] = Math.max(0,
-          this._channelQuality[channelName] * 0.99 - 0.01);
-      }
+      // Update contact quality using batch RMS (phase-independent)
+      let sumSq = 0;
+      for (let s = 0; s < nSamples; s++) sumSq += values[s] * values[s];
+      const rms = Math.sqrt(sumSq / nSamples);
+      // Good contact: RMS in physiological EEG range (1–200 µV)
+      // Below 1 µV = no signal / rail; above 200 µV = movement artifact
+      const good = rms > 1 && rms < 200;
+      const prev = this._channelQuality[channelName];
+      // Asymmetric smoothing: rise fast (~1s to 50%), fall slow (~3.5s to half)
+      this._channelQuality[channelName] = good
+        ? Math.min(1, prev + 0.15 * (1 - prev))
+        : prev * 0.95;
     }
 
     this.bus.publish('Aetheria_EEG', {
