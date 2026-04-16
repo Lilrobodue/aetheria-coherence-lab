@@ -17,6 +17,7 @@ import { PolicyEngine } from './policy/state-machine.js';
 import { BCSEngine } from './bcs/bcs-engine.js';
 import { SessionRecorder } from './recording/session-recorder.js';
 import { generateReport } from './recording/session-report.js';
+import { buildTaggerExport, TAGGER_URL } from './recording/tagger-export.js';
 
 // Global app state
 const health = new SensorHealthMonitor(bus);
@@ -42,6 +43,7 @@ const app = {
 };
 
 let wakeLockSentinel = null;
+let pendingSessionData = null;
 
 // Expose app for console debugging
 window.aetheria = app;
@@ -165,6 +167,31 @@ async function init() {
   document.getElementById('btn-connect-h10').addEventListener('click', connectH10);
   document.getElementById('btn-connect-muse').addEventListener('click', connectMuse);
   document.getElementById('btn-start').addEventListener('click', toggleSession);
+
+  // Session complete modal buttons
+  document.getElementById('btn-download-full').addEventListener('click', () => {
+    if (!pendingSessionData) return;
+    const blob = new Blob([JSON.stringify(pendingSessionData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aetheria-session-${pendingSessionData.metadata.sessionId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+  document.getElementById('btn-export-tagger').addEventListener('click', () => {
+    if (!pendingSessionData) return;
+    downloadTaggerExport(pendingSessionData);
+    document.getElementById('tagger-export-confirm').classList.remove('hidden');
+  });
+  document.getElementById('btn-new-session').addEventListener('click', dismissSessionComplete);
+
+  // Set tagger URLs from constant (not hardcoded in HTML)
+  document.getElementById('tagger-link-text').href = TAGGER_URL;
+  document.getElementById('tagger-link-text').textContent = TAGGER_URL.replace('https://', '');
+  document.getElementById('tagger-link-btn').href = TAGGER_URL;
 
   // Re-acquire wake lock when tab becomes visible again
   document.addEventListener('visibilitychange', async () => {
@@ -316,10 +343,8 @@ async function toggleSession() {
         'system'
       );
 
-      // Auto-download session JSON
-      app.recorder.download();
       console.log('Session report:', report);
-      app.recorder = null;
+      showSessionComplete(sessionData);
     }
 
     await releaseWakeLock();
@@ -329,6 +354,34 @@ async function toggleSession() {
     btn.style.color = '';
     app.dashboard.addLogEntry('Session stopped by user', 'system');
   }
+}
+
+// --- Session Complete ---
+
+function showSessionComplete(sessionData) {
+  pendingSessionData = sessionData;
+  document.getElementById('tagger-export-confirm').classList.add('hidden');
+  document.getElementById('session-complete-modal').classList.remove('hidden');
+}
+
+function downloadTaggerExport(fullSession) {
+  const exportObj = buildTaggerExport(fullSession);
+  const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const date = fullSession.metadata.startTime.split('T')[0];
+  a.download = `aetheria-tagger-export_${fullSession.metadata.sessionId}_${date}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function dismissSessionComplete() {
+  pendingSessionData = null;
+  app.recorder = null;
+  document.getElementById('session-complete-modal').classList.add('hidden');
 }
 
 function formatTime(sec) {

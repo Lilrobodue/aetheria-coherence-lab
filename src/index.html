@@ -140,6 +140,31 @@
     .ble-warning { display: none; padding: 12px; margin: 8px; background: rgba(255,82,82,0.1); border: 1px solid var(--error); border-radius: 4px; color: var(--error); text-align: center; font-size: 12px; }
     .ble-warning.visible { display: block; }
 
+    .hidden { display: none !important; }
+
+    /* Session Complete Modal */
+    .session-complete-actions {
+      display: flex; flex-direction: column; gap: 12px; margin-top: 24px;
+    }
+    .session-action-btn { width: 100%; text-align: center; }
+    .btn-tagger { border-color: var(--success); color: var(--success); }
+    .btn-tagger:hover { background: rgba(0, 230, 118, 0.15); }
+    .btn-dismiss { border-color: var(--text-dim); color: var(--text-secondary); }
+    .btn-dismiss:hover { background: rgba(255, 255, 255, 0.05); }
+    .tagger-confirm {
+      margin-top: 24px; padding: 16px;
+      background: rgba(0, 230, 118, 0.08);
+      border: 1px solid rgba(0, 230, 118, 0.2);
+      border-radius: 6px;
+    }
+    .tagger-confirm p { margin-bottom: 12px; }
+    .tagger-confirm a { color: var(--success); }
+    .btn-open-tagger {
+      display: inline-block; border-color: var(--success); color: var(--success);
+      text-decoration: none; text-align: center;
+    }
+    .btn-open-tagger:hover { background: rgba(0, 230, 118, 0.15); }
+
     /* ===== Modal Overlays (Disclaimer + Tutorial) ===== */
     .modal-overlay {
       position: fixed;
@@ -496,12 +521,41 @@
   </div>
 </div>
 
+<!-- Session Complete Modal -->
+<div id="session-complete-modal" class="modal-overlay hidden">
+  <div class="modal-content">
+    <h1>Session Complete</h1>
+    <p>Your session data has been recorded. Choose what to do next.</p>
+
+    <div class="session-complete-actions">
+      <button id="btn-download-full" class="modal-btn session-action-btn">
+        Download Full Session
+      </button>
+      <button id="btn-export-tagger" class="modal-btn session-action-btn btn-tagger">
+        Export for Tagger
+      </button>
+      <button id="btn-new-session" class="modal-btn session-action-btn btn-dismiss">
+        Start New Session
+      </button>
+    </div>
+
+    <div id="tagger-export-confirm" class="tagger-confirm hidden">
+      <p>Exported! Upload this file to the Session Tagger at
+        <a id="tagger-link-text" href="#" target="_blank" rel="noopener noreferrer"></a>
+        to add your notes and subjective context.</p>
+      <a id="tagger-link-btn" href="#" target="_blank" rel="noopener noreferrer"
+         class="modal-btn btn-open-tagger">Open Tagger &rarr;</a>
+    </div>
+  </div>
+</div>
+
 <div class="app">
 
   <!-- Header -->
   <div class="header">
     <div class="header-title">Aetheria Coherence Lab</div>
     <div class="header-controls">
+      <a href="links.html" class="btn btn-guide" title="Links & Resources" style="text-decoration:none">&#9741;</a>
       <button id="btn-guide" class="btn btn-guide" title="Getting Started Guide">?</button>
       <button id="btn-connect-h10" class="btn btn-connect">Connect H10</button>
       <button id="btn-connect-muse" class="btn btn-connect">Connect Muse</button>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Aetheria — Links & Resources</title>
+<meta name="description" content="The Aetheria ecosystem — healing frequency tools, books, simulations, music, and community.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#06060c;--bg2:#0a0810;--bg3:#0f0a14;--bdr:#1a1520;--dim:#3a3030;--mut:#4a4030;--sub:#6a5a4a;--txt:#e0d8cc;--gld:#d4a574;--gld2:#f0d4a8;--pur:#7B50D4;--mag:#A840B8;--blu:#5048C4;--grn:#4A7C59;--ora:#C47A14;--coral:#C43A6A}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--txt);font-family:'Cormorant Garamond',Georgia,serif;min-height:100vh;overflow-x:hidden}
+
+/* Ambient background */
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at 50% 0%,#1a103020 0%,transparent 60%),radial-gradient(ellipse at 80% 80%,#7B50D408 0%,transparent 40%);pointer-events:none;z-index:0}
+
+.container{max-width:520px;margin:0 auto;padding:24px 16px 60px;position:relative;z-index:1}
+
+/* Back link */
+.back-link{display:inline-flex;align-items:center;gap:6px;color:var(--sub);text-decoration:none;font-size:12px;letter-spacing:.04em;margin-bottom:12px;transition:color .2s}
+.back-link:hover{color:var(--gld)}
+
+/* Header */
+.header{text-align:center;padding:20px 0 30px}
+.logo-ring{width:80px;height:80px;border-radius:50%;border:1.5px solid var(--gld);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;position:relative;animation:pulse-ring 4s ease-in-out infinite}
+.logo-ring::after{content:'';position:absolute;inset:-6px;border-radius:50%;border:1px solid var(--pur);opacity:.3;animation:pulse-ring 4s ease-in-out infinite reverse}
+@keyframes pulse-ring{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:1;transform:scale(1.03)}}
+.logo-text{font-size:22px;color:var(--gld);letter-spacing:.4em;font-weight:300}
+.logo-432{font-size:11px;color:var(--pur);letter-spacing:.2em;font-weight:400}
+h1{font-size:32px;font-weight:300;color:var(--gld);letter-spacing:.15em;margin-bottom:4px}
+.tagline{font-size:13px;color:var(--sub);letter-spacing:.08em;font-style:italic}
+.divider{width:60px;height:1px;background:linear-gradient(90deg,transparent,var(--gld),transparent);margin:16px auto}
+
+/* Section headers */
+.section-label{font-size:9px;color:var(--dim);letter-spacing:.2em;text-transform:uppercase;text-align:center;margin:28px 0 12px;position:relative}
+.section-label::before,.section-label::after{content:'';position:absolute;top:50%;width:60px;height:1px;background:var(--bdr)}
+.section-label::before{right:calc(50% + 60px)}
+.section-label::after{left:calc(50% + 60px)}
+
+/* Link cards */
+.link{display:flex;align-items:center;gap:14px;background:var(--bg2);border:1px solid var(--bdr);border-radius:10px;padding:14px 16px;margin-bottom:8px;text-decoration:none;color:var(--txt);transition:all .25s ease;position:relative;overflow:hidden}
+.link:hover{border-color:var(--gld);transform:translateY(-1px);box-shadow:0 4px 20px #d4a57410}
+.link:active{transform:translateY(0)}
+.link::after{content:'\2197';position:absolute;right:16px;color:var(--dim);font-size:14px;transition:all .25s}
+.link:hover::after{color:var(--gld);right:12px}
+
+.link-icon{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.link-text h3{font-size:14px;font-weight:500;letter-spacing:.03em;margin-bottom:1px}
+.link-text p{font-size:11px;color:var(--sub);line-height:1.4}
+
+/* Icon colors */
+.ic-gold{background:linear-gradient(135deg,#d4a57422,#d4a57408);border:1px solid #d4a57433}
+.ic-pur{background:linear-gradient(135deg,#7B50D422,#7B50D408);border:1px solid #7B50D433}
+.ic-mag{background:linear-gradient(135deg,#A840B822,#A840B808);border:1px solid #A840B833}
+.ic-blu{background:linear-gradient(135deg,#5048C422,#5048C408);border:1px solid #5048C433}
+.ic-grn{background:linear-gradient(135deg,#4A7C5922,#4A7C5908);border:1px solid #4A7C5933}
+.ic-coral{background:linear-gradient(135deg,#C43A6A22,#C43A6A08);border:1px solid #C43A6A33}
+.ic-ora{background:linear-gradient(135deg,#C47A1422,#C47A1408);border:1px solid #C47A1433}
+
+/* Simulation grid */
+.sim-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.sim-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:10px;padding:14px;text-decoration:none;color:var(--txt);transition:all .25s;text-align:center}
+.sim-card:hover{border-color:var(--blu);transform:translateY(-1px);box-shadow:0 4px 20px #5048C410}
+.sim-card .sim-icon{font-size:24px;margin-bottom:6px}
+.sim-card h3{font-size:12px;font-weight:500;line-height:1.3;letter-spacing:.02em}
+.sim-card p{font-size:9px;color:var(--dim);margin-top:3px}
+
+/* Footer */
+.footer{text-align:center;padding:30px 0 20px}
+.footer-line{font-size:10px;color:var(--dim);letter-spacing:.06em;margin-bottom:4px}
+.footer-heart{font-size:14px;margin:8px 0}
+.footer a{color:var(--sub);text-decoration:none}
+.footer a:hover{color:var(--gld)}
+
+/* Responsive */
+@media(max-width:360px){
+  .sim-grid{grid-template-columns:1fr}
+  h1{font-size:26px}
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <a class="back-link" href="index.html">&larr; Back to Coherence Lab</a>
+
+  <div class="header">
+    <div class="logo-ring">
+      <div>
+        <div class="logo-text">A</div>
+        <div class="logo-432">432</div>
+      </div>
+    </div>
+    <h1>AETHERIA</h1>
+    <div class="tagline">Healing the world heART</div>
+    <div class="divider"></div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px">Created by Joseph & Alisha Lewis</div>
+    <div style="font-size:10px;color:var(--dim)">Air Force Veterans &middot; Mountain Home, Idaho</div>
+  </div>
+
+  <!-- APPS -->
+  <div class="section-label">Apps & Tools</div>
+
+  <a class="link" href="https://aetheria432.com" target="_blank">
+    <div class="link-icon ic-gold">&#127925;</div>
+    <div class="link-text">
+      <h3>Aetheria 432Hz Player</h3>
+      <p>27-frequency harmonic healing system</p>
+    </div>
+  </a>
+
+  <a class="link" href="https://aetheriarct.com" target="_blank">
+    <div class="link-icon ic-pur">&#129504;</div>
+    <div class="link-text">
+      <h3>Aetheria RCT</h3>
+      <p>Muse 2 EEG neuro-adaptive coherence training</p>
+    </div>
+  </a>
+
+  <a class="link" href="https://aetheria-session-tagger.org" target="_blank">
+    <div class="link-icon ic-grn">&#127991;&#65039;</div>
+    <div class="link-text">
+      <h3>Aetheria Session Tagger</h3>
+      <p>Add subjective context to your Coherence Lab sessions</p>
+    </div>
+  </a>
+
+  <!-- SOPHIA -->
+  <div class="section-label">Sophia</div>
+
+  <a class="link" href="https://aetheriasos.com" target="_blank">
+    <div class="link-icon ic-mag">&#128302;</div>
+    <div class="link-text">
+      <h3>Sophia</h3>
+      <p>Your personal AI companion &mdash; runs locally, no cloud</p>
+    </div>
+  </a>
+
+  <!-- BOOKS -->
+  <div class="section-label">Books</div>
+
+  <a class="link" href="https://a.co/d/079tM297" target="_blank">
+    <div class="link-icon ic-mag">&#128214;</div>
+    <div class="link-text">
+      <h3>Aetheria</h3>
+      <p>The frequency healing system &mdash; foundational text</p>
+    </div>
+  </a>
+
+  <a class="link" href="https://a.co/d/0c83ZGEu" target="_blank">
+    <div class="link-icon ic-blu">&#128218;</div>
+    <div class="link-text">
+      <h3>The Golden Thread</h3>
+      <p>One equation across all scales &mdash; E=hf as universal key</p>
+    </div>
+  </a>
+
+  <a class="link" href="https://a.co/d/0ckEN0Qs" target="_blank">
+    <div class="link-icon ic-ora">&#128213;</div>
+    <div class="link-text">
+      <h3>Cosmic Rhythms</h3>
+      <p>How sun, moon & earth shape your biology</p>
+    </div>
+  </a>
+
+  <a class="link" href="https://a.co/d/04Y1pUtE" target="_blank">
+    <div class="link-icon ic-coral">&#128215;</div>
+    <div class="link-text">
+      <h3>SFB &mdash; A TBI Guide</h3>
+      <p>Navigating traumatic brain injury recovery</p>
+    </div>
+  </a>
+
+  <!-- MUSIC -->
+  <div class="section-label">Music</div>
+
+  <a class="link" href="https://open.spotify.com/artist/4CXB2ctrUCvInDQkKDhw4q" target="_blank">
+    <div class="link-icon ic-grn">&#127911;</div>
+    <div class="link-text">
+      <h3>Aetheria on Spotify</h3>
+      <p>Frequency-tuned healing music &mdash; 432Hz</p>
+    </div>
+  </a>
+
+  <!-- SIMULATIONS -->
+  <div class="section-label">Interactive Simulations</div>
+
+  <div class="sim-grid">
+    <a class="sim-card" href="https://lilrobodue.github.io/Lewis-Vortex-Model/" target="_blank">
+      <div class="sim-icon">&#127744;</div>
+      <h3>Lewis Vortex Model</h3>
+      <p>Formation Theory</p>
+    </a>
+    <a class="sim-card" href="https://lilrobodue.github.io/Unified-Scale-Navigator/" target="_blank">
+      <div class="sim-icon">&#128300;</div>
+      <h3>Unified Scale Navigator</h3>
+      <p>Quantum to cosmic</p>
+    </a>
+    <a class="sim-card" href="https://lilrobodue.github.io/HRV-Coherence-Visualizer/" target="_blank">
+      <div class="sim-icon">&#128147;</div>
+      <h3>HRV Coherence Visualizer</h3>
+      <p>Heart rate variability</p>
+    </a>
+    <a class="sim-card" href="https://lilrobodue.github.io/Schumann-Biology-Simulator/" target="_blank">
+      <div class="sim-icon">&#127758;</div>
+      <h3>Schumann Biology Simulator</h3>
+      <p>Earth's resonance</p>
+    </a>
+    <a class="sim-card" href="https://lilrobodue.github.io/Cellular-Voltage-Frequency-Model/" target="_blank">
+      <div class="sim-icon">&#9889;</div>
+      <h3>Cellular Voltage Model</h3>
+      <p>Frequency & cell health</p>
+    </a>
+    <a class="sim-card" href="https://lilrobodue.github.io/Galactic-Scale-Vortex-Formation/" target="_blank">
+      <div class="sim-icon">&#128296;</div>
+      <h3>Galactic Vortex Formation</h3>
+      <p>Cosmic scale structure</p>
+    </a>
+  </div>
+
+  <!-- COMMUNITY -->
+  <div class="section-label">Community & Social</div>
+
+  <a class="link" href="https://discord.gg/ddR3MfgCsM" target="_blank">
+    <div class="link-icon ic-blu">&#128172;</div>
+    <div class="link-text">
+      <h3>Th3 L0unG3 &mdash; Discord</h3>
+      <p>365+ healing frequency songs &middot; community &middot; resources</p>
+    </div>
+  </a>
+
+  <a class="link" href="https://www.youtube.com/@Aetheria432" target="_blank">
+    <div class="link-icon ic-coral">&#9654;</div>
+    <div class="link-text">
+      <h3>YouTube</h3>
+      <p>Aetheria content, demos, and explorations</p>
+    </div>
+  </a>
+
+  <a class="link" href="https://x.com/TheyCallmeJobo" target="_blank">
+    <div class="link-icon ic-ora">&#128038;</div>
+    <div class="link-text">
+      <h3>X / Twitter</h3>
+      <p>@TheyCallmeJobo &mdash; thoughts, updates, frequencies</p>
+    </div>
+  </a>
+
+  <!-- CONTACT -->
+  <div class="section-label">Contact</div>
+
+  <a class="link" href="mailto:Aetheria432@pm.me">
+    <div class="link-icon ic-gold">&#9993;</div>
+    <div class="link-text">
+      <h3>Aetheria432@pm.me</h3>
+      <p>Questions, collaborations, research inquiries</p>
+    </div>
+  </a>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="footer-heart">&#128156;</div>
+    <div class="footer-line">Healing the world heART</div>
+    <div class="footer-line">&copy; 2026 Joseph & Alisha Lewis / <a href="https://aetheria432.com">Aetheria</a></div>
+    <div class="footer-line" style="margin-top:8px;font-size:9px">27 frequencies &middot; 432 Hz &middot; 3-6-9</div>
+    <div class="footer-line" style="font-size:9px">Built with love by the Lewis family & Selah</div>
+  </div>
+
+</div>
+</body>
+</html>
