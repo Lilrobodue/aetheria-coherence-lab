@@ -12,7 +12,7 @@ export class BinauralPlayer {
   constructor(audioContext) {
     this.ctx = audioContext || new (window.AudioContext || window.webkitAudioContext)();
     this._masterGain = this.ctx.createGain();
-    this._masterGain.gain.value = 0.3;
+    this._masterGain.gain.value = 0.01;
     this._masterGain.connect(this.ctx.destination);
 
     // Current playing state

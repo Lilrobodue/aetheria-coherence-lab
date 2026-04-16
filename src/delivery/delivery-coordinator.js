@@ -66,10 +66,16 @@ export class DeliveryCoordinator {
     const carrierBase = this.config.carrier_base_hz ?? 200;
     const freq = freqEntry.frequency_hz;
 
-    console.log(`Delivery: playing ${freq} Hz (${freqEntry.regime} / root ${freqEntry.digital_root}) — ${freqEntry.name}`);
+    // Octave-shift frequencies above 963 Hz into sub-bass for binaural delivery
+    let beatFreq = freq;
+    if (beatFreq > 963) {
+      while (beatFreq > 80) beatFreq /= 2;
+    }
 
-    // Start binaural
-    await this._binaural.play(freq, carrierBase, fade);
+    console.log(`Delivery: playing ${freq} Hz → beat ${beatFreq.toFixed(1)} Hz (${freqEntry.regime} / root ${freqEntry.digital_root}) — ${freqEntry.name}`);
+
+    // Start binaural (carriers at ~200 Hz, beat at sub-bass for high frequencies)
+    await this._binaural.play(beatFreq, carrierBase, fade);
 
     // Start haptic
     await this._woojer.play(freq);
