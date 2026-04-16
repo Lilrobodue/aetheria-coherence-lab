@@ -58,6 +58,15 @@ export function buildTaggerExport(fullSessionJSON) {
     export_type: 'session_summary_for_tagger',
     exported_at: new Date().toISOString(),
 
+    // metadata block for compatibility with the Session Tagger's validation
+    metadata: {
+      sessionId: metadata.sessionId,
+      userId: metadata.userId,
+      startTime: metadata.startTime,
+      endTime: metadata.endTime,
+      softwareVersion: metadata.softwareVersion
+    },
+
     session: {
       sessionId: metadata.sessionId,
       startTime: metadata.startTime,
