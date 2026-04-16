@@ -192,6 +192,7 @@ async function init() {
   document.getElementById('tagger-link-text').href = TAGGER_URL;
   document.getElementById('tagger-link-text').textContent = TAGGER_URL.replace('https://', '');
   document.getElementById('tagger-link-btn').href = TAGGER_URL;
+  document.getElementById('tutorial-tagger-link').href = TAGGER_URL;
 
   // Re-acquire wake lock when tab becomes visible again
   document.addEventListener('visibilitychange', async () => {
