@@ -445,15 +445,28 @@ export class PolicyEngine {
     return false;
   }
 
-  // Calibrated 2026-04-17 after session analysis: CLOSE_ON_STAGNATION — session_max hasn't moved in N prescriptions and enough have been tried; replaces the old pivot-budget path, which no longer reliably fires.
+  // Calibrated 2026-04-17 after session analysis: CLOSE_ON_STAGNATION — session_max hasn't moved in N prescriptions, enough have been tried, AND recent peaks are actually declining (not just holding near session_max). Gated behind the same 6-min floor as CLOSE_ON_SUSTAINED_PEAK so success has first crack.
   _checkStagnation() {
     const minRx = this.config.stagnation_min_prescriptions ?? 6;
     const windows = this.config.stagnation_windows ?? 3;
+    const declineRatio = this.config.stagnation_decline_ratio ?? 0.80;
+    const minDur = this.config.success_min_duration_sec ?? 360;
+
+    if (this.sessionDuration < minDur) return false;
     const rxPlayed = this._frequencyHistory.length;
     if (rxPlayed < minRx) return false;
     const rxSincePeak = rxPlayed - this._prescriptionOfSessionMax;
     if (rxSincePeak < windows) return false;
-    this._enterClosing(`no further gains — diminishing returns (Rx_since_peak=${rxSincePeak})`);
+
+    const recent = this._prescriptionPeaks.slice(-windows);
+    if (recent.length < windows) return false;
+    const meanRecent = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const floor = declineRatio * this._sessionMaxTcs;
+    if (meanRecent >= floor) return false;
+
+    this._enterClosing(
+      `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak}, mean_recent_peaks=${meanRecent.toFixed(1)} < floor=${floor.toFixed(1)} [${Math.round(declineRatio * 100)}% of session_max ${this._sessionMaxTcs.toFixed(1)}])`
+    );
     return true;
   }
 
