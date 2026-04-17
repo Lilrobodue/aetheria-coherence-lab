@@ -428,6 +428,15 @@ export class PolicyEngine {
       ? Math.max(...trailing)
       : this._sessionMaxTcs;
 
+    // Sustained success requires the recent cluster itself to be
+    // therapeutically meaningful — not just tightly clustered internally.
+    // Without this gate, a session that peaks high then settles into a low
+    // plateau (e.g., peaked 86 then holds 54-58) fires SUSTAINED_PEAK
+    // because trailing_max follows the decline down and a low floor (~49)
+    // is easily cleared. That mislabels stagnation as success. Closing on
+    // STAGNATION is the correct label for low-plateau sessions.
+    if (trailingMax <= significantPeak) return false;
+
     const recent = this._prescriptionPeaks.slice(-windows);
     const floor = ratio * trailingMax;
     if (!recent.every(p => p >= floor)) return false;
