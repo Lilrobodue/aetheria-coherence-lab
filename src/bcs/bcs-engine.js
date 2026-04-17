@@ -35,9 +35,22 @@ export class BCSEngine {
     this.latestBCS = 0;
     this.latestComponents = { kuramoto: 0, sharedEnergy: 0, mutualInfo: 0 };
     this.phaseTransition = { detected: false, time: null, magnitude: null };
+
+    // Calibrated 2026-04-17 after session analysis: sensor settling produced a bogus phase_transition_time_seconds=1.69 in an observed session; suppress detections during warmup.
+    this._sessionStartSec = null;
+    this._warmupSec = (config && config.phase_transition_warmup_sec != null) ? config.phase_transition_warmup_sec : 20;
   }
 
   start() {
+    this._sessionStartSec = null;
+    // Calibrated 2026-04-17 after session analysis: the warmup window is session-relative, not app-relative — reset on STARTUP so pre-session feature accumulation doesn't exhaust it.
+    this._unsubscribers.push(
+      this.bus.subscribe('Aetheria_State', (p) => {
+        if (p.type === 'state_transition' && p.to === 'STARTUP') {
+          this._sessionStartSec = performance.now() / 1000;
+        }
+      })
+    );
     // Subscribe to features for envelope accumulation
     this._unsubscribers.push(
       this.bus.subscribe('Aetheria_Features', (p) => {
@@ -135,6 +148,14 @@ export class BCSEngine {
     if (this._bcsHistory.length > 200) this._bcsHistory.shift();
 
     this.phaseTransition = detectPhaseTransition(this._bcsHistory);
+
+    // Calibrated 2026-04-17 after session analysis: sensor warmup can look like a phase transition; suppress any detection inside the warmup window.
+    const sessionAge = this._sessionStartSec != null
+      ? (performance.now() / 1000 - this._sessionStartSec)
+      : Infinity;
+    if (sessionAge < this._warmupSec && this.phaseTransition.detected) {
+      this.phaseTransition = { detected: false, time: null, magnitude: null };
+    }
 
     // Publish
     this.bus.publish('Aetheria_BCS', {

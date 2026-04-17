@@ -24,6 +24,7 @@
   "no_repetition_window": 5,
   "crossfade_duration_sec": 4,
   "carrier_base_hz": 200,
+  "phase_transition_warmup_sec": 20,
   "tcs_weights": {
     "gut": 0.20,
     "heart": 0.20,
