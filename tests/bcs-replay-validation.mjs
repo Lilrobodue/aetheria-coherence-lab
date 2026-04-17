@@ -94,19 +94,125 @@ function replayOneSample(session, s) {
   }
 }
 
+// Partial analysis for tagger-export format (no streams.features, so we
+// can't recompute shared_energy through the new code path). Reports:
+//   - Zero count and timestamps
+//   - Cluster structure (runs of ≥2 consecutive zeros)
+//   - Singleton zeros (isolated ticks, not part of a cluster)
+//   - Which state phase each zero occurred in (BASELINE, ENTRAIN, CLOSING...)
+function partialAnalysis(bcs, transitions, label) {
+  const originalZeros = bcs.filter(s => s.sharedEnergy === 0);
+  const originalNonZeros = bcs.filter(s => s.sharedEnergy != null && s.sharedEnergy > 0);
+  const originalNulls = bcs.filter(s => s.sharedEnergy == null);
+  const clusters = findZeroClusters(bcs);
+
+  const byCluster = new Set(clusters.flatMap(c => c.map(s => s.t)));
+  const singletons = originalZeros.filter(s => !byCluster.has(s.t));
+
+  // Annotate each zero with the state phase it occurred during
+  const annotate = (z) => ({ ...z, phase: phaseAtTime(z.t, transitions) });
+  const annZeros = originalZeros.map(annotate);
+
+  console.log(`  Total BCS samples      : ${bcs.length}`);
+  console.log(`  Original SE=0 samples  : ${originalZeros.length}`);
+  if (annZeros.length) {
+    for (const z of annZeros) {
+      console.log(`    t=${z.t.toFixed(2)}s  phase=${z.phase}`);
+    }
+  }
+  console.log(`  Original non-zero      : ${originalNonZeros.length}`);
+  if (originalNulls.length) {
+    console.log(`  Pre-existing nulls     : ${originalNulls.length} (already post-fix)`);
+  }
+
+  console.log(`  Zero clusters (≥2)     : ${clusters.length}`);
+  for (const c of clusters) {
+    const phases = c.map(s => phaseAtTime(s.t, transitions));
+    const uniquePhases = [...new Set(phases)];
+    const phaseStr = uniquePhases.length === 1 ? uniquePhases[0] : phases.join('→');
+    console.log(`    t=${c[0].t.toFixed(0)}-${c.at(-1).t.toFixed(0)}s  n=${c.length}  phase=${phaseStr}`);
+  }
+  if (singletons.length) {
+    console.log(`  Singleton zeros        : ${singletons.length}`);
+    for (const s of singletons) {
+      console.log(`    t=${s.t.toFixed(2)}s  phase=${phaseAtTime(s.t, transitions)}`);
+    }
+  }
+
+  console.log();
+  console.log('  (No streams.features — cannot recompute shared_energy.)');
+  console.log('  Structural analysis only. For full replay, provide the full session JSON');
+  console.log('  (the "Download Full Session" file, not the tagger export).');
+
+  return {
+    label,
+    kind: 'partial',
+    totalBcs: bcs.length,
+    zeroCount: originalZeros.length,
+    zerosByPhase: annZeros,
+    clusters,
+    singletons,
+    nonZeroCount: originalNonZeros.length
+  };
+}
+
+// Normalize both full-session and tagger-export shapes into a common
+// { bcs: [{t, sharedEnergy, ...}], features: [...] | null } form.
+function normalizeSession(session) {
+  if (session.streams?.bcs && Array.isArray(session.streams.bcs)) {
+    return {
+      kind: 'full-session',
+      bcs: session.streams.bcs,
+      features: session.streams.features || null,
+      transitions: session.streams.state || []
+    };
+  }
+  const ts = session.time_series;
+  if (ts?.bcs_t && Array.isArray(ts.bcs_t)) {
+    const bcs = ts.bcs_t.map((t, i) => ({
+      t,
+      bcs: ts.bcs_value?.[i] ?? null,
+      kuramoto: ts.bcs_kuramoto?.[i] ?? null,
+      sharedEnergy: ts.bcs_shared_energy?.[i] ?? null,
+      mutualInfo: ts.bcs_mutual_info?.[i] ?? null,
+      phaseTransition: ts.bcs_phase_transition?.[i] ?? false
+    }));
+    return {
+      kind: 'tagger-export',
+      bcs,
+      features: null,
+      transitions: session.state_transitions || []
+    };
+  }
+  return null;
+}
+
+function phaseAtTime(t, transitions) {
+  // Return the state name that was active at time t.
+  let current = 'STARTUP';
+  for (const tr of transitions) {
+    if (tr.t == null) continue;
+    if (t >= tr.t) current = tr.to || current;
+    else break;
+  }
+  return current;
+}
+
 function validateSession(session, label) {
   console.log(`\n── Session: ${label}`);
-  const bcs = session.streams?.bcs;
-  const features = session.streams?.features;
-
-  if (!bcs || !Array.isArray(bcs)) {
-    console.log('  ✗ no streams.bcs — not a Phase 7 session');
+  const norm = normalizeSession(session);
+  if (!norm) {
+    console.log('  ✗ unrecognized session shape (no streams.bcs and no time_series.bcs_t)');
     return null;
   }
-  if (!features || !Array.isArray(features)) {
-    console.log('  ✗ no streams.features — recorder pre-dates feature capture');
-    console.log('  BLOCKER: cannot rebuild envelopes without upstream inputs.');
-    return null;
+  console.log(`  format: ${norm.kind}`);
+  const bcs = norm.bcs;
+  const features = norm.features;
+
+  if (norm.kind === 'tagger-export' || !features) {
+    // Partial analysis: count zeros, cluster them, correlate with state phases.
+    // Cannot recompute because the tagger export strips streams.features.
+    return partialAnalysis(bcs, norm.transitions, label);
   }
 
   const originalZeros = bcs.filter(s => s.sharedEnergy === 0);
@@ -277,41 +383,51 @@ function main() {
   console.log('='.repeat(72));
   if (results.length === 0) { console.log('No sessions validated.'); process.exit(1); }
 
-  const totalZeros = results.reduce((s, r) => s + r.zeroCount, 0);
-  const totalStillZero = results.reduce((s, r) => s + r.zerosStillZeroCount, 0);
-  const totalNowNull = results.reduce((s, r) => s + r.zerosNowNullCount, 0);
-  const totalNonZeroMatch = results.reduce((s, r) => s + r.nonZeroMatch, 0);
-  const totalNonZeroTotal = results.reduce((s, r) => s + r.nonZeroTotal, 0);
-  const allClusters = results.flatMap(r => r.clusters);
-  const mixedClusters = allClusters.filter(c => !c.homogeneous);
+  const full = results.filter(r => r.kind !== 'partial');
+  const partial = results.filter(r => r.kind === 'partial');
 
-  console.log(`Sessions validated      : ${results.length}`);
-  console.log(`Historical SE=0 samples : ${totalZeros}`);
-  console.log(`  → null + flag         : ${totalNowNull} / ${totalZeros}`);
-  console.log(`  → still numeric 0     : ${totalStillZero}`);
-  console.log(`Non-zero match rate     : ${totalNonZeroMatch} / ${totalNonZeroTotal}`);
-  console.log(`Clusters (≥2)           : ${allClusters.length} (${mixedClusters.length} mixed)`);
-
-  let exitCode = 0;
-  if (totalStillZero > 0) {
+  if (partial.length) {
+    const totalZeros = partial.reduce((s, r) => s + r.zeroCount, 0);
+    const totalNonZero = partial.reduce((s, r) => s + r.nonZeroCount, 0);
+    const totalClusters = partial.reduce((s, r) => s + r.clusters.length, 0);
+    const totalSingletons = partial.reduce((s, r) => s + r.singletons.length, 0);
+    console.log(`Tagger-export sessions (structural only): ${partial.length}`);
+    console.log(`  Total BCS samples       : ${partial.reduce((s, r) => s + r.totalBcs, 0)}`);
+    console.log(`  Historical SE=0 samples : ${totalZeros}`);
+    console.log(`  Non-zero samples        : ${totalNonZero}`);
+    console.log(`  Zero clusters (≥2)      : ${totalClusters}`);
+    console.log(`  Singleton zeros         : ${totalSingletons}`);
     console.log();
-    console.log('⚠  Commit 12 missed paths. See t-values flagged above.');
-    exitCode = 2;
+    console.log('  Full replay requires the unfiltered session JSON (streams.features');
+    console.log('  must be present). The current SessionRecorder captures this — any');
+    console.log('  session recorded via "Download Full Session" is replayable.');
   }
-  if (mixedClusters.length > 0) {
-    console.log();
-    console.log('⚠  Mixed flags inside clusters — multiple failure modes in rapid succession:');
-    for (const c of mixedClusters) {
-      console.log(`   t=${c.start.toFixed(0)}-${c.end.toFixed(0)}s  flags=${JSON.stringify(c.flags)}`);
+
+  if (full.length) {
+    const totalZeros = full.reduce((s, r) => s + r.zeroCount, 0);
+    const totalStillZero = full.reduce((s, r) => s + r.zerosStillZeroCount, 0);
+    const totalNowNull = full.reduce((s, r) => s + r.zerosNowNullCount, 0);
+    const totalNonZeroMatch = full.reduce((s, r) => s + r.nonZeroMatch, 0);
+    const totalNonZeroTotal = full.reduce((s, r) => s + r.nonZeroTotal, 0);
+    const allClusters = full.flatMap(r => r.clusters || []);
+    const mixedClusters = allClusters.filter(c => !c.homogeneous);
+    console.log(`Full-session replays    : ${full.length}`);
+    console.log(`Historical SE=0 samples : ${totalZeros}`);
+    console.log(`  → null + flag         : ${totalNowNull} / ${totalZeros}`);
+    console.log(`  → still numeric 0     : ${totalStillZero}`);
+    console.log(`Non-zero match rate     : ${totalNonZeroMatch} / ${totalNonZeroTotal}`);
+    console.log(`Clusters (≥2)           : ${allClusters.length} (${mixedClusters.length} mixed)`);
+    if (totalStillZero > 0) {
+      console.log();
+      console.log('⚠  Commit 12 missed paths. See t-values flagged above.');
+      process.exit(2);
+    }
+    if (totalNowNull === totalZeros && mixedClusters.length === 0) {
+      console.log();
+      console.log('✓ CLOSE_ON_UNIFIED_COHERENCE can safely consume bcs_value.');
     }
   }
-  if (totalNowNull === totalZeros && mixedClusters.length === 0 && totalStillZero === 0) {
-    console.log();
-    console.log('✓ CLOSE_ON_UNIFIED_COHERENCE can safely consume bcs_value.');
-    console.log('  Every historic SE=0 now emits null + flag; bcs_value_quality');
-    console.log('  correctly distinguishes "partial" from "full" ticks.');
-  }
-  process.exit(exitCode);
+  process.exit(0);
 }
 
 main();
