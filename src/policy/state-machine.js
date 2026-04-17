@@ -42,6 +42,9 @@ export class PolicyEngine {
     // Calibrated 2026-04-17 after session analysis: adaptive ENTRAIN window — base 30s, 45s on extension or after the first pivot of the session.
     this._inExtension = false;
     this._hasPivotedEver = false;
+    // Calibrated 2026-04-17 after session analysis: track session-max TCS and per-prescription peaks for CLOSE_ON_SUSTAINED_PEAK.
+    this._sessionMaxTcs = 0;
+    this._prescriptionPeaks = [];
     this._goalSustainStart = null;
     this._hugPeakTcs = 0;
     this._hugPeakLostSince = null;
@@ -343,6 +346,15 @@ export class PolicyEngine {
       this._consecutivePivots = 0;
     }
 
+    // Calibrated 2026-04-17 after session analysis: on prescription end (PIVOT/ADVANCE), record the window peak and run the close-on-sustained-peak check before dispatching.
+    if (result.decision === 'PIVOT' || result.decision === 'ADVANCE') {
+      this._prescriptionPeaks.push(this._tcsMaxInState);
+      if (this._tcsMaxInState > this._sessionMaxTcs) {
+        this._sessionMaxTcs = this._tcsMaxInState;
+      }
+      if (this._checkSustainedPeak()) return;
+    }
+
     if (result.decision === 'HOLD') {
       // Calibrated 2026-04-17 after session analysis: HOLD or slope-veto re-entry is an extension, not a fresh base window.
       this._inExtension = true;
@@ -382,6 +394,29 @@ export class PolicyEngine {
       this._transition('COMPLETE', `Hug complete. Peak TCS: ${this._hugPeakTcs.toFixed(0)}, held for ${duration.toFixed(0)}s`);
       this._finish();
     }
+  }
+
+  // Calibrated 2026-04-17 after session analysis: CLOSE_ON_SUSTAINED_PEAK — coherence has settled at a meaningful peak; close gracefully on success.
+  _checkSustainedPeak() {
+    const minDur = this.config.success_min_duration_sec ?? 360;
+    const ratio = this.config.sustain_ratio ?? 0.90;
+    const windows = this.config.sustain_windows ?? 2;
+    if (this.sessionDuration < minDur) return false;
+    if (this._prescriptionPeaks.length < windows) return false;
+
+    const peakK = this.config.peak_significance_k ?? 1.5;
+    const significantPeak = (this._baselineTcsMean != null && this._baselineTcsStd != null)
+      ? this._baselineTcsMean + peakK * this._baselineTcsStd
+      : 65;
+    if (this._sessionMaxTcs <= significantPeak) return false;
+
+    const recent = this._prescriptionPeaks.slice(-windows);
+    const floor = ratio * this._sessionMaxTcs;
+    if (!recent.every(p => p >= floor)) return false;
+
+    const recentStr = recent.map(p => p.toFixed(1)).join(', ');
+    this._enterClosing(`coherence held — closing on peak (session_max=${this._sessionMaxTcs.toFixed(1)}, recent_peaks=[${recentStr}])`);
+    return true;
   }
 
   _checkTermination(V) {
