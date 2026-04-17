@@ -3,7 +3,15 @@
 // Strict if/else cascade: first match wins.
 // Returns 'HOLD' | 'ADVANCE' | 'PIVOT'.
 
-import { linearSlope } from '../math/stats.js';
+import { linearSlope, mean } from '../math/stats.js';
+
+// Calibrated 2026-04-17 after session analysis: rising windows were being pivoted away from before they converged; compute a simple endpoint-mean slope used only to veto low-confidence PIVOTs.
+function extensionSlope(history) {
+  if (!history || history.length < 10) return null;
+  const firstFive = history.slice(0, 5);
+  const lastFive = history.slice(-5);
+  return mean(lastFive) - mean(firstFive);
+}
 
 /**
  * Evaluate the current entrainment and decide what to do next.
@@ -24,7 +32,8 @@ export function evaluate(params, config) {
   const {
     tcsHistory, tcsNow, tcsAtEntry, tcsMaxInState,
     coherenceVector, entryVector,
-    baselineTcsMean, baselineTcsStd
+    baselineTcsMean, baselineTcsStd,
+    slopeVetoAvailable
   } = params;
 
   const deltaTCS = tcsNow - tcsAtEntry;
@@ -43,6 +52,10 @@ export function evaluate(params, config) {
   const significantPeak = (baselineTcsMean != null && baselineTcsStd != null)
     ? (baselineTcsMean + peakK * baselineTcsStd)
     : 65;
+  // Calibrated 2026-04-17 after session analysis: +3 TCS rise across the window means the frequency is still entraining; suppress low-confidence pivots.
+  const slopeVetoThreshold = config.slope_veto_threshold ?? 3.0;
+  const extSlope = extensionSlope(tcsHistory);
+  const canVeto = slopeVetoAvailable && extSlope !== null && extSlope >= slopeVetoThreshold;
 
   // Rule 1 — Strong positive response
   if (deltaTCS >= advanceDelta && slope >= 0) {
@@ -62,6 +75,13 @@ export function evaluate(params, config) {
 
   // Rule 3 — Coherent plateau at low level
   if (tcsNow < pivotLowPlateau && Math.abs(slope) < slopeThreshold && tcsHistory.length >= 30) {
+    if (canVeto) {
+      return {
+        decision: 'HOLD',
+        reason: `Slope-veto: freq still entraining (+${extSlope.toFixed(1)} across window)`,
+        appliedSlopeVeto: true
+      };
+    }
     return {
       decision: 'PIVOT',
       reason: `Low plateau: TCS ${tcsNow.toFixed(0)} not moving, deficit may have shifted`
@@ -76,6 +96,13 @@ export function evaluate(params, config) {
         reason: `Peak was high (${tcsMaxInState.toFixed(0)} > ${significantPeak.toFixed(0)}), declining — advance`
       };
     } else {
+      if (canVeto) {
+        return {
+          decision: 'HOLD',
+          reason: `Slope-veto: freq still entraining (+${extSlope.toFixed(1)} across window)`,
+          appliedSlopeVeto: true
+        };
+      }
       return {
         decision: 'PIVOT',
         reason: `Declining from low peak (${tcsMaxInState.toFixed(0)} ≤ ${significantPeak.toFixed(0)}) — pivot`

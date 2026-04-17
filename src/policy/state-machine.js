@@ -37,6 +37,8 @@ export class PolicyEngine {
     this._tcsMaxInState = 0;
     this._entryVector = null;
     this._consecutivePivots = 0;
+    // Calibrated 2026-04-17 after session analysis: allow at most one slope-veto extension per prescription.
+    this._slopeVetoUsed = false;
     this._goalSustainStart = null;
     this._hugPeakTcs = 0;
     this._hugPeakLostSince = null;
@@ -253,6 +255,8 @@ export class PolicyEngine {
     this._tcsMaxInState = V ? V.tcs : 0;
     this._tcsHistory = [];
     this._entryVector = V ? { ...V } : null;
+    // Fresh prescription: reset slope-veto budget (at most one veto per prescription).
+    this._slopeVetoUsed = false;
 
     this._transition('ENTRAIN',
       `Playing ${freq?.frequency_hz || '?'} Hz, entering entrainment`);
@@ -311,10 +315,16 @@ export class PolicyEngine {
       coherenceVector: V,
       entryVector: this._entryVector,
       baselineTcsMean: this._baselineTcsMean,
-      baselineTcsStd: this._baselineTcsStd
+      baselineTcsStd: this._baselineTcsStd,
+      slopeVetoAvailable: !this._slopeVetoUsed
     }, this.config);
 
     this._lastHint = result.decision;
+
+    // Calibrated 2026-04-17 after session analysis: consume the per-prescription veto budget when applied.
+    if (result.appliedSlopeVeto) {
+      this._slopeVetoUsed = true;
+    }
 
     // Track consecutive pivots
     if (result.decision === 'PIVOT') {

@@ -11,6 +11,7 @@
   "plateau_slope_threshold": 0.1,
   "peak_significance_k": 1.5,
   "baseline_tcs_std_floor": 3.0,
+  "slope_veto_threshold": 3.0,
   "plateau_duration_low_sec": 30,
   "plateau_duration_high_sec": 15,
   "session_max_duration_sec": 1800,
