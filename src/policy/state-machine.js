@@ -419,13 +419,15 @@ export class PolicyEngine {
   }
 
   _checkTermination(V) {
-    const maxDuration = this.config.session_max_duration_sec || 1800;
+    // Calibrated 2026-04-17 after session analysis: time cap halved to 15 min as a safety net, not a target. In a healthy session the sustained-peak or stagnation rule should fire first.
+    const maxDuration = this.config.session_max_duration_sec || 900;
     const goalTcs = this.config.goal_tcs_threshold || 80;
     const goalSustain = this.config.goal_sustain_duration_sec || 60;
 
-    // Time cap
+    // Time cap (safety net)
     if (this.sessionDuration >= maxDuration) {
-      this._enterClosing('Time cap reached');
+      console.warn(`[policy] time-cap safety net fired at ${maxDuration}s — neither CLOSE_ON_SUSTAINED_PEAK nor CLOSE_ON_STAGNATION triggered; session did not converge.`);
+      this._enterClosing('Time cap reached (safety net)');
       return true;
     }
 

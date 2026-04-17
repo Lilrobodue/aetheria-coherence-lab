@@ -15,7 +15,7 @@
   "slope_veto_threshold": 3.0,
   "plateau_duration_low_sec": 30,
   "plateau_duration_high_sec": 15,
-  "session_max_duration_sec": 1800,
+  "session_max_duration_sec": 900,
   "goal_tcs_threshold": 80,
   "goal_sustain_duration_sec": 60,
   "success_min_duration_sec": 360,
