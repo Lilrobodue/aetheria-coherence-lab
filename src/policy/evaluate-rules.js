@@ -15,13 +15,16 @@ import { linearSlope } from '../math/stats.js';
  * @param {number} params.tcsMaxInState - peak TCS observed since entering ENTRAIN
  * @param {object} params.coherenceVector - current CoherenceVector
  * @param {object} params.entryVector - CoherenceVector at entry to ENTRAIN
+ * @param {number|null} params.baselineTcsMean - mean TCS during BASELINE (null if not calibrated)
+ * @param {number|null} params.baselineTcsStd - std TCS during BASELINE (null if not calibrated)
  * @param {object} config - thresholds from policy.json
  * @returns {{ decision: string, reason: string }}
  */
 export function evaluate(params, config) {
   const {
     tcsHistory, tcsNow, tcsAtEntry, tcsMaxInState,
-    coherenceVector, entryVector
+    coherenceVector, entryVector,
+    baselineTcsMean, baselineTcsStd
   } = params;
 
   const deltaTCS = tcsNow - tcsAtEntry;
@@ -35,6 +38,11 @@ export function evaluate(params, config) {
   const pivotLowPlateau = config.pivot_low_plateau_tcs_threshold || 50;
   const declineThreshold = config.decline_from_peak_threshold || 10;
   const slopeThreshold = config.plateau_slope_threshold || 0.1;
+  // Calibrated 2026-04-17 after session analysis: "high peak" becomes relative to this user's baseline (μ + K·σ), falls back to absolute 65 pre-calibration.
+  const peakK = config.peak_significance_k ?? 1.5;
+  const significantPeak = (baselineTcsMean != null && baselineTcsStd != null)
+    ? (baselineTcsMean + peakK * baselineTcsStd)
+    : 65;
 
   // Rule 1 — Strong positive response
   if (deltaTCS >= advanceDelta && slope >= 0) {
@@ -62,15 +70,15 @@ export function evaluate(params, config) {
 
   // Rule 4 — Decline from peak
   if (tcsNow < (tcsMaxInState - declineThreshold)) {
-    if (tcsMaxInState >= 65) {
+    if (tcsMaxInState > significantPeak) {
       return {
         decision: 'ADVANCE',
-        reason: `Peak was high (${tcsMaxInState.toFixed(0)}), declining — advance`
+        reason: `Peak was high (${tcsMaxInState.toFixed(0)} > ${significantPeak.toFixed(0)}), declining — advance`
       };
     } else {
       return {
         decision: 'PIVOT',
-        reason: `Declining from low peak (${tcsMaxInState.toFixed(0)}) — pivot`
+        reason: `Declining from low peak (${tcsMaxInState.toFixed(0)} ≤ ${significantPeak.toFixed(0)}) — pivot`
       };
     }
   }

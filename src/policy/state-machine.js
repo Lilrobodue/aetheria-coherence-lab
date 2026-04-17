@@ -7,6 +7,7 @@
 import { ArousalAnchor } from './arousal-anchor.js';
 import { CascadeCursor, selectFirstFrequency, selectNextFrequency, onDirectionFlip } from './selection-rules.js';
 import { evaluate } from './evaluate-rules.js';
+import { mean, std } from '../math/stats.js';
 
 const STATES = ['STARTUP', 'BASELINE', 'ASSESS', 'PRESCRIBE', 'ENTRAIN', 'EVALUATE', 'CLOSING', 'COMPLETE', 'PAUSE', 'ABORT'];
 
@@ -25,6 +26,10 @@ export class PolicyEngine {
     this._sessionStart = null;
     this._stateStart = null;
     this._baselineFeatures = [];
+    // Calibrated 2026-04-17 after session analysis: absolute peak thresholds (e.g. 65) fail when user peaks top out at 45-72; capture per-session baseline TCS stats so "low peak" becomes relative to THIS user's baseline distribution.
+    this._baselineTcsSamples = [];
+    this._baselineTcsMean = null;
+    this._baselineTcsStd = null;
     this._currentFrequency = null;
     this._frequencyHistory = [];
     this._tcsHistory = [];
@@ -106,7 +111,7 @@ export class PolicyEngine {
         this._tickStartup();
         break;
       case 'BASELINE':
-        this._tickBaseline(F, duration);
+        this._tickBaseline(V, F, duration);
         break;
       case 'ASSESS':
         this._tickAssess(V);
@@ -146,12 +151,16 @@ export class PolicyEngine {
     }
   }
 
-  _tickBaseline(features, duration) {
+  _tickBaseline(V, features, duration) {
     const baselineDuration = this.config.baseline_duration_sec || 90;
 
     // Collect features during baseline
     if (features) {
       this._baselineFeatures.push(features);
+    }
+    // Calibrated 2026-04-17 after session analysis: TCS stats drive the relative "low peak" threshold.
+    if (V && isFinite(V.tcs)) {
+      this._baselineTcsSamples.push(V.tcs);
     }
 
     if (duration >= baselineDuration && this._baselineFeatures.length >= 10) {
@@ -190,6 +199,14 @@ export class PolicyEngine {
 
     // Calibrate the coherence engine's z-scorers
     this.bus.publish('Aetheria_State', { type: 'calibrate_baseline', history });
+
+    // Calibrated 2026-04-17 after session analysis: compute per-session TCS baseline stats (std floor prevents hair-trigger on unusually quiet baselines).
+    if (this._baselineTcsSamples.length >= 10) {
+      const stdFloor = this.config.baseline_tcs_std_floor ?? 3.0;
+      this._baselineTcsMean = mean(this._baselineTcsSamples);
+      this._baselineTcsStd = Math.max(std(this._baselineTcsSamples), stdFloor);
+      console.log(`Policy: baseline TCS μ=${this._baselineTcsMean.toFixed(1)} σ=${this._baselineTcsStd.toFixed(1)} (n=${this._baselineTcsSamples.length})`);
+    }
 
     // Set arousal anchor and initialise cascade cursor
     const lastFeatures = this._baselineFeatures[this._baselineFeatures.length - 1];
@@ -292,7 +309,9 @@ export class PolicyEngine {
       tcsAtEntry: this._tcsAtEntry,
       tcsMaxInState: this._tcsMaxInState,
       coherenceVector: V,
-      entryVector: this._entryVector
+      entryVector: this._entryVector,
+      baselineTcsMean: this._baselineTcsMean,
+      baselineTcsStd: this._baselineTcsStd
     }, this.config);
 
     this._lastHint = result.decision;

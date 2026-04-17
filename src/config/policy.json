@@ -9,6 +9,8 @@
   "pivot_low_plateau_tcs_threshold": 50,
   "decline_from_peak_threshold": 10,
   "plateau_slope_threshold": 0.1,
+  "peak_significance_k": 1.5,
+  "baseline_tcs_std_floor": 3.0,
   "plateau_duration_low_sec": 30,
   "plateau_duration_high_sec": 15,
   "session_max_duration_sec": 1800,
