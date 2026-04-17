@@ -76,6 +76,25 @@
     .btn.btn-start { border-color: var(--warning); color: var(--warning); }
     .btn.btn-start:hover:not(:disabled) { background: rgba(255,193,7,0.15); }
 
+    /* Closing-heartbeat strength slider (Woojer feedback strength) */
+    .hug-slider {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--border); border-radius: 3px;
+      background: var(--bg-panel);
+      font-size: 11px; color: var(--text-secondary);
+    }
+    .hug-slider input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 80px; height: 18px; background: transparent;
+      accent-color: var(--accent);
+    }
+    .hug-slider .hug-label { color: var(--text-dim); }
+    .hug-slider .hug-value {
+      color: var(--text-primary); min-width: 30px;
+      font-variant-numeric: tabular-nums; text-align: right;
+    }
+
     /* Info bar: status + data flow + session in one row */
     .info-bar {
       display: flex; align-items: center; gap: 16px; padding: 4px 16px;
@@ -342,6 +361,10 @@
         font-size: 14px;
         border-radius: 6px;
       }
+
+      /* --- Heartbeat slider on mobile: larger, easier to grab --- */
+      .hug-slider { padding: 8px 12px; font-size: 13px; min-height: 44px; border-radius: 6px; }
+      .hug-slider input[type=range] { width: 120px; height: 32px; }
 
       /* --- Info bar: readable on mobile --- */
       .info-bar {
@@ -819,6 +842,11 @@
       <button id="btn-connect-h10" class="btn btn-connect">Connect H10</button>
       <button id="btn-connect-muse" class="btn btn-connect">Connect Muse</button>
       <button id="btn-start" class="btn btn-start" disabled>Start Session</button>
+      <span class="hug-slider" title="Closing heartbeat strength (Woojer). 1.0× is the original; boost for felt-through-clothing.">
+        <span class="hug-label">Hug</span>
+        <input type="range" id="hug-strength" min="0.5" max="3.0" step="0.1" value="1.0" aria-label="Closing heartbeat strength">
+        <span class="hug-value" id="hug-value">1.0&times;</span>
+      </span>
       <span style="margin-left:8px;border-left:1px solid rgba(255,255,255,0.1);padding-left:8px;" id="freq-selector"></span>
     </div>
   </div>
@@ -931,6 +959,21 @@
       if (e.key === 'Escape' && !tutorial.classList.contains('hidden')) {
         tutorial.classList.add('hidden');
       }
+    });
+
+    // Heartbeat-strength slider — persists to localStorage, consumed by
+    // DeliveryCoordinator.playHeartbeat() at session close.
+    const hugInput = document.getElementById('hug-strength');
+    const hugValue = document.getElementById('hug-value');
+    const savedStrength = parseFloat(localStorage.getItem('aetheria_heartbeat_strength'));
+    if (isFinite(savedStrength) && savedStrength >= 0.5 && savedStrength <= 3.0) {
+      hugInput.value = savedStrength.toString();
+      hugValue.innerHTML = `${savedStrength.toFixed(1)}&times;`;
+    }
+    hugInput.addEventListener('input', () => {
+      const v = parseFloat(hugInput.value);
+      hugValue.innerHTML = `${v.toFixed(1)}&times;`;
+      localStorage.setItem('aetheria_heartbeat_strength', v.toFixed(1));
     });
 
     // Links & Resources — toggled via header "☍" button

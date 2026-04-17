@@ -16,9 +16,14 @@
  * @param {AudioContext} ctx - Web Audio context
  * @param {AudioNode} destination - output node (master gain → speakers + Woojer)
  * @param {number} [baseFreqHz=60] - base frequency for the heartbeat pulse
+ * @param {number} [strength=1.0] - multiplier on cycle amplitude. The default
+ *   1.0 preserves the original 0.4-peak envelope. Values up to ~2.5 can
+ *   be felt through clothing on the Woojer; 3.0 is the safe ceiling
+ *   before the per-pulse gain would clip at the DAC. _pulse() clamps
+ *   the computed peak to 0.95 as a final safety net.
  * @returns {Promise<void>}
  */
-export async function playHeartbeatSignature(ctx, destination, baseFreqHz = 60) {
+export async function playHeartbeatSignature(ctx, destination, baseFreqHz = 60, strength = 1.0) {
   if (ctx.state === 'suspended') await ctx.resume();
 
   const cycles = [
@@ -30,11 +35,12 @@ export async function playHeartbeatSignature(ctx, destination, baseFreqHz = 60) 
   let t = ctx.currentTime + 0.05; // small lead-in
 
   for (const cycle of cycles) {
+    const scaledAmp = cycle.amplitude * strength;
     // LUB — stronger systolic pulse
-    _pulse(ctx, destination, t, cycle.lubDuration, baseFreqHz, cycle.amplitude);
+    _pulse(ctx, destination, t, cycle.lubDuration, baseFreqHz, scaledAmp);
 
     // dub — softer diastolic pulse
-    _pulse(ctx, destination, t + cycle.dubDelay, cycle.dubDuration, baseFreqHz * 0.8, cycle.amplitude * 0.6);
+    _pulse(ctx, destination, t + cycle.dubDelay, cycle.dubDuration, baseFreqHz * 0.8, scaledAmp * 0.6);
 
     t += cycle.interval;
   }
@@ -50,12 +56,15 @@ function _pulse(ctx, destination, startTime, duration, freqHz, amplitude) {
   osc.type = 'sine';
   osc.frequency.value = freqHz;
 
+  // Peak is amplitude * 0.4 baseline. Clamp at 0.95 so boosted strengths
+  // (>2.5×) can't drive the gain node into clipping territory at the DAC.
+  const peak = Math.min(amplitude * 0.4, 0.95);
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0, startTime);
   // Quick attack
-  gain.gain.linearRampToValueAtTime(amplitude * 0.4, startTime + 0.01);
+  gain.gain.linearRampToValueAtTime(peak, startTime + 0.01);
   // Hold
-  gain.gain.setValueAtTime(amplitude * 0.4, startTime + duration * 0.6);
+  gain.gain.setValueAtTime(peak, startTime + duration * 0.6);
   // Decay
   gain.gain.linearRampToValueAtTime(0, startTime + duration);
 

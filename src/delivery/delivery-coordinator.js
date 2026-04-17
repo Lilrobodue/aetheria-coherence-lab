@@ -118,8 +118,15 @@ export class DeliveryCoordinator {
   /** Play the closing heartbeat signature. */
   async playHeartbeat() {
     if (!this._initialized) await this.init();
-    console.log('Delivery: playing heartbeat signature');
-    await playHeartbeatSignature(this._audioCtx, this._binaural.masterGain);
+    // Read strength from localStorage (set by the header slider). Clamped to
+    // [0.5, 3.0] to match the slider's UI range.
+    let strength = 1.0;
+    try {
+      const saved = parseFloat(localStorage.getItem('aetheria_heartbeat_strength'));
+      if (isFinite(saved)) strength = Math.min(3.0, Math.max(0.5, saved));
+    } catch {}
+    console.log(`Delivery: playing heartbeat signature (strength ${strength.toFixed(1)}×)`);
+    await playHeartbeatSignature(this._audioCtx, this._binaural.masterGain, 60, strength);
   }
 
   /** Set master volume (0-1). */
