@@ -21,7 +21,12 @@ export class CoherencePanel {
     this._hr = 0;
     this._deficit = 'NONE';
     this._lead = 'NONE';
-    this._bcs = 0;
+    // Calibrated 2026-04-17 after session analysis: BCS may be null on
+    // ticks where sharedEnergy could not be measured. Track the quality
+    // flags alongside the value so the gap can be shown explicitly.
+    this._bcs = null;
+    this._bcsQuality = null;
+    this._sharedEnergyQuality = null;
     this._phaseTransition = false;
     this._state = 'IDLE';
   }
@@ -56,10 +61,14 @@ export class CoherencePanel {
       })
     );
 
-    // Subscribe to BCS (Phase 7: proof layer)
+    // Subscribe to BCS (Phase 7: proof layer).
+    // Preserve null for no-measurement ticks so the display shows a gap
+    // rather than zero-dipping.
     this._unsubscribers.push(
       this.bus.subscribe('Aetheria_BCS', (p) => {
-        this._bcs = isFinite(p.bcs) ? p.bcs : 0;
+        this._bcs = (p.bcs != null && isFinite(p.bcs)) ? p.bcs : null;
+        this._bcsQuality = p.bcsQuality || null;
+        this._sharedEnergyQuality = p.sharedEnergyQuality || null;
         this._phaseTransition = p.phaseTransition?.detected || false;
       })
     );
@@ -187,16 +196,25 @@ export class CoherencePanel {
     ctx.textAlign = 'center';
     const infoY = h - 6;
 
-    // BCS (the truth score)
-    if (this._bcs > 0) {
+    // BCS (the truth score). Null means the last tick had no valid
+    // measurement (e.g., MEMD could not produce a shared-energy value).
+    // Render as "BCS --" with the quality flag below, in the tertiary
+    // color, so the user sees a signal-quality gap rather than a zero dip.
+    if (this._bcs != null && this._bcs > 0) {
       const bcsColor = this._bcs >= 70 ? '#00e676' : this._bcs >= 40 ? '#ffc107' : '#ff5252';
       ctx.fillStyle = bcsColor;
-      ctx.fillText(`BCS ${this._bcs.toFixed(0)}`, cx - 70, infoY);
-      // Phase transition indicator
+      const partialMark = this._bcsQuality === 'partial' ? '*' : '';
+      ctx.fillText(`BCS ${this._bcs.toFixed(0)}${partialMark}`, cx - 70, infoY);
       if (this._phaseTransition) {
         ctx.fillStyle = '#e040fb';
         ctx.fillText('UNIFIED', cx - 70, infoY - 11);
       }
+    } else if (this._sharedEnergyQuality && this._sharedEnergyQuality !== 'ok') {
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fillText('BCS --', cx - 70, infoY);
+      ctx.font = '8px monospace';
+      ctx.fillText(`signal: ${this._sharedEnergyQuality}`, cx - 70, infoY - 10);
+      ctx.font = '9px monospace';
     }
 
     if (this._plv > 0) {

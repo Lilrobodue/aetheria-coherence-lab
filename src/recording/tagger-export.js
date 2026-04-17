@@ -22,12 +22,18 @@ export function buildTaggerExport(fullSessionJSON) {
   const meanTcs = tcsValues.length > 0
     ? tcsValues.reduce((a, b) => a + b, 0) / tcsValues.length : 0;
 
-  // BCS stats (null if no BCS stream — older sessions predate v1.3 Phase 7)
-  const bcsValues = bcs.map(b => b.bcs).filter(v => isFinite(v));
+  // BCS stats (null if no BCS stream — older sessions predate v1.3 Phase 7).
+  // Calibrated 2026-04-17: null samples (MEMD could not produce a valid
+  // sharedEnergy on that tick) are filtered out — they are "no measurement"
+  // gaps, not zeros. This corrects peak/mean aggregates on sessions with
+  // exact-zero dropouts at start/end.
+  const bcsValues = bcs.map(b => b.bcs).filter(v => v != null && isFinite(v));
   const hasBcs = bcsValues.length > 0;
   const peakBcs = hasBcs ? Math.max(...bcsValues) : null;
   const meanBcs = hasBcs
     ? bcsValues.reduce((a, b) => a + b, 0) / bcsValues.length : null;
+  const sampleCount = bcs.length;
+  const gapCount = bcs.filter(b => b.sharedEnergy == null).length;
 
   // Phase transition
   const phaseTransitionEntry = bcs.find(b => b.phaseTransition === true);
@@ -80,6 +86,8 @@ export function buildTaggerExport(fullSessionJSON) {
       mean_tcs: +meanTcs.toFixed(1),
       peak_bcs: hasBcs ? +peakBcs.toFixed(1) : null,
       mean_bcs: hasBcs ? +meanBcs.toFixed(1) : null,
+      bcs_sample_count: sampleCount,
+      bcs_gap_count: gapCount,
       phase_transition_detected: phaseTransitionDetected,
       phase_transition_time_seconds: phaseTransitionTimeSeconds,
       harm_one_count: harmOneCount,
@@ -89,6 +97,12 @@ export function buildTaggerExport(fullSessionJSON) {
       closing_type: closingType
     },
 
+    // Calibrated 2026-04-17 after session analysis: bcs_value and
+    // bcs_shared_energy may contain JSON null for ticks where MEMD could
+    // not produce a valid measurement. Downstream consumers (Session
+    // Tagger, analytics) MUST treat null as a gap, not as zero.
+    // bcs_value_quality ∈ 'full' | 'partial' | 'unavailable'
+    // bcs_shared_energy_quality ∈ 'ok' | 'low_variance' | 'divide_by_zero' | 'nan_guard'
     time_series: {
       coherence_t: coherence.map(c => c.t),
       coherence_tcs: coherence.map(c => c.tcs),
@@ -98,10 +112,12 @@ export function buildTaggerExport(fullSessionJSON) {
       coherence_plv: coherence.map(c => c.plv),
       coherence_harm: coherence.map(c => c.harm),
       bcs_t: bcs.map(b => b.t),
-      bcs_value: bcs.map(b => b.bcs),
-      bcs_kuramoto: bcs.map(b => b.kuramoto),
-      bcs_shared_energy: bcs.map(b => b.sharedEnergy),
-      bcs_mutual_info: bcs.map(b => b.mutualInfo),
+      bcs_value: bcs.map(b => b.bcs ?? null),
+      bcs_value_quality: bcs.map(b => b.bcsQuality ?? null),
+      bcs_kuramoto: bcs.map(b => b.kuramoto ?? null),
+      bcs_shared_energy: bcs.map(b => b.sharedEnergy ?? null),
+      bcs_shared_energy_quality: bcs.map(b => b.sharedEnergyQuality ?? null),
+      bcs_mutual_info: bcs.map(b => b.mutualInfo ?? null),
       bcs_phase_transition: bcs.map(b => b.phaseTransition)
     },
 

@@ -85,12 +85,27 @@ export function multivariateEMD(channels, options = {}) {
  * Compute the shared mode energy fraction (Doc 5 §3.2).
  * An IMF is "shared" if it carries >10% of channel total energy in ALL channels.
  *
+ * Returns a {value, quality, reason?} result so downstream consumers can
+ * distinguish "no measurement" (null) from "zero coherence measured" (0).
+ * Calibrated 2026-04-17 after session analysis exposed exact-0 dropouts
+ * clustered at session start/end — those were "no measurement" cases being
+ * written as numeric 0, poisoning aggregates and (now) decision paths.
+ *
  * @param {(Float64Array|number[])[]} channels
- * @returns {number} fraction 0-1
+ * @returns {{ value: number|null, quality: string, reason?: string }}
+ *   quality ∈ 'ok' | 'low_variance' | 'divide_by_zero' | 'nan_guard'
+ *   value is null whenever quality !== 'ok'; 0 is only returned with
+ *   quality='ok' and means a legitimate "no shared modes detected" result.
  */
 export function sharedModeEnergyFraction(channels) {
   const imfs = multivariateEMD(channels);
-  if (imfs.length === 0) return 0;
+
+  // Path A: MEMD's residual-energy threshold broke the IMF loop before any
+  // IMF was extracted. Near-zero input energy — sensor settling, flat
+  // signal, or one channel disconnected. Not a real zero measurement.
+  if (imfs.length === 0) {
+    return { value: null, quality: 'low_variance', reason: 'memd_produced_no_imfs' };
+  }
 
   const nCh = channels.length;
 
@@ -124,7 +139,14 @@ export function sharedModeEnergyFraction(channels) {
     if (isShared) sharedEnergy += imfTotal;
   }
 
-  return totalAllEnergy > 0 ? sharedEnergy / totalAllEnergy : 0;
+  // Path B: degenerate — IMFs exist but all carry zero summed energy.
+  if (totalAllEnergy <= 0) {
+    return { value: null, quality: 'divide_by_zero', reason: 'all_imfs_zero_energy' };
+  }
+
+  // Path C: legitimate measurement. value may be 0 if no IMF qualified as
+  // "shared" — that's a real "no generative unity" result, not a dropout.
+  return { value: sharedEnergy / totalAllEnergy, quality: 'ok' };
 }
 
 // --- Internal helpers ---

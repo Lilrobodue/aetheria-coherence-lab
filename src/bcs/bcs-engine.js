@@ -13,6 +13,39 @@ import { meanPairwiseNMI } from './mutual-information.js';
 import { detectPhaseTransition } from './phase-transition.js';
 import { lowpass, resampleLinear } from '../math/filters.js';
 
+/**
+ * Compose BCS from its three components, tolerating a null sharedEnergy.
+ * Calibrated 2026-04-17 after session analysis: on ticks where MEMD could
+ * not produce a valid sharedEnergy, we rescale the kuramoto and mutualInfo
+ * weights to sum to the original total so BCS remains comparable across
+ * "full" and "partial" ticks rather than being dragged toward zero by a
+ * missing 35% weight slot.
+ *
+ * @param {{kuramoto:number, sharedEnergy:number|null, mutualInfo:number}} c
+ * @param {{kuramoto:number, shared_energy:number, mutual_info:number}} w
+ * @returns {{ bcs: number|null, quality: 'full'|'partial'|'unavailable' }}
+ */
+export function composeBcs(c, w) {
+  const kValid = isFinite(c.kuramoto);
+  const seValid = c.sharedEnergy != null && isFinite(c.sharedEnergy);
+  const miValid = isFinite(c.mutualInfo);
+
+  if (kValid && seValid && miValid) {
+    const bcs = 100 * (w.kuramoto * c.kuramoto + w.shared_energy * c.sharedEnergy + w.mutual_info * c.mutualInfo);
+    return { bcs, quality: 'full' };
+  }
+  if (kValid && miValid) {
+    // SE absent — rescale K and MI weights to sum to the original total so
+    // the score is on the same scale as a "full" tick.
+    const origSum = w.kuramoto + w.shared_energy + w.mutual_info;
+    const partialSum = w.kuramoto + w.mutual_info;
+    const scale = origSum / partialSum;
+    const bcs = 100 * scale * (w.kuramoto * c.kuramoto + w.mutual_info * c.mutualInfo);
+    return { bcs, quality: 'partial' };
+  }
+  return { bcs: null, quality: 'unavailable' };
+}
+
 export class BCSEngine {
   constructor(bus, config) {
     this.bus = bus;
@@ -31,9 +64,10 @@ export class BCSEngine {
     // BCS history for phase transition detection
     this._bcsHistory = [];
 
-    // Latest values
-    this.latestBCS = 0;
-    this.latestComponents = { kuramoto: 0, sharedEnergy: 0, mutualInfo: 0 };
+    // Latest values — null until first successful compute.
+    this.latestBCS = null;
+    this.latestBCSQuality = null;
+    this.latestComponents = { kuramoto: null, sharedEnergy: null, sharedEnergyQuality: null, mutualInfo: null };
     this.phaseTransition = { detected: false, time: null, magnitude: null };
 
     // Calibrated 2026-04-17 after session analysis: sensor settling produced a bogus phase_transition_time_seconds=1.69 in an observed session; suppress detections during warmup.
@@ -117,56 +151,72 @@ export class BCSEngine {
     // 1. Kuramoto order parameter (phase unity)
     const kuramoto = kuramotoFromEnvelopes(gutEnv, heartEnv, headEnv);
 
-    // 2. Shared mode energy fraction (generative unity via MEMD)
-    let sharedEnergy = 0;
+    // 2. Shared mode energy fraction (generative unity via MEMD).
+    // Calibrated 2026-04-17 after session analysis: sharedModeEnergyFraction
+    // now returns {value, quality} so we can distinguish null ("no
+    // measurement") from a legitimate numeric 0 ("no shared modes").
+    let seResult;
     try {
-      sharedEnergy = sharedModeEnergyFraction([gutEnv, heartEnv, headEnv]);
+      seResult = sharedModeEnergyFraction([gutEnv, heartEnv, headEnv]);
     } catch (e) {
       console.warn('BCS MEMD error:', e.message);
+      seResult = { value: null, quality: 'nan_guard', reason: e.message };
+    }
+    // Defensive: any non-finite number becomes null + nan_guard.
+    if (seResult.value != null && !isFinite(seResult.value)) {
+      seResult = { value: null, quality: 'nan_guard', reason: 'non_finite' };
     }
 
     // 3. Normalized mutual information (informational unity)
     const mutualInfo = meanPairwiseNMI([gutEnv, heartEnv, headEnv]);
 
-    // Composite BCS (Doc 5 §4)
+    // Composite BCS — if SE is null, rescale K+MI weights to fill the gap.
     const w = this.config.bcs_weights || { kuramoto: 0.40, shared_energy: 0.35, mutual_info: 0.25 };
-    const bcs = 100 * (
-      w.kuramoto * (isFinite(kuramoto) ? kuramoto : 0) +
-      w.shared_energy * (isFinite(sharedEnergy) ? sharedEnergy : 0) +
-      w.mutual_info * (isFinite(mutualInfo) ? mutualInfo : 0)
-    );
+    const kValid = isFinite(kuramoto);
+    const seValid = seResult.value != null && isFinite(seResult.value);
+    const miValid = isFinite(mutualInfo);
+    const composed = composeBcs({ kuramoto, sharedEnergy: seResult.value, mutualInfo }, w);
+    const bcs = composed.bcs;
+    const bcsQuality = composed.quality;
 
-    this.latestBCS = isFinite(bcs) ? bcs : 0;
+    this.latestBCS = bcs;
     this.latestComponents = {
-      kuramoto: isFinite(kuramoto) ? kuramoto : 0,
-      sharedEnergy: isFinite(sharedEnergy) ? sharedEnergy : 0,
-      mutualInfo: isFinite(mutualInfo) ? mutualInfo : 0
+      kuramoto: kValid ? kuramoto : null,
+      sharedEnergy: seValid ? seResult.value : null,
+      sharedEnergyQuality: seResult.quality,
+      mutualInfo: miValid ? mutualInfo : null
     };
+    this.latestBCSQuality = bcsQuality;
 
-    // Track BCS history for phase transition detection
-    this._bcsHistory.push({ time: performance.now() / 1000, bcs: this.latestBCS });
-    if (this._bcsHistory.length > 200) this._bcsHistory.shift();
+    // Track BCS history for phase transition detection — skip null samples
+    // so the detector isn't fed synthetic zeros from no-measurement ticks.
+    if (bcs != null) {
+      this._bcsHistory.push({ time: performance.now() / 1000, bcs });
+      if (this._bcsHistory.length > 200) this._bcsHistory.shift();
+      this.phaseTransition = detectPhaseTransition(this._bcsHistory);
 
-    this.phaseTransition = detectPhaseTransition(this._bcsHistory);
-
-    // Calibrated 2026-04-17 after session analysis: sensor warmup can look like a phase transition; suppress any detection inside the warmup window.
-    const sessionAge = this._sessionStartSec != null
-      ? (performance.now() / 1000 - this._sessionStartSec)
-      : Infinity;
-    if (sessionAge < this._warmupSec && this.phaseTransition.detected) {
-      this.phaseTransition = { detected: false, time: null, magnitude: null };
+      // Calibrated 2026-04-17 after session analysis: sensor warmup can look like a phase transition; suppress any detection inside the warmup window.
+      const sessionAge = this._sessionStartSec != null
+        ? (performance.now() / 1000 - this._sessionStartSec)
+        : Infinity;
+      if (sessionAge < this._warmupSec && this.phaseTransition.detected) {
+        this.phaseTransition = { detected: false, time: null, magnitude: null };
+      }
     }
 
     // Publish
     this.bus.publish('Aetheria_BCS', {
-      bcs: this.latestBCS,
+      bcs,
+      bcsQuality,
       kuramoto: this.latestComponents.kuramoto,
       sharedEnergy: this.latestComponents.sharedEnergy,
+      sharedEnergyQuality: this.latestComponents.sharedEnergyQuality,
       mutualInfo: this.latestComponents.mutualInfo,
       phaseTransition: this.phaseTransition
     });
 
-    console.log(`BCS: ${this.latestBCS.toFixed(1)} (K:${kuramoto.toFixed(2)} E:${sharedEnergy.toFixed(2)} MI:${mutualInfo.toFixed(2)})` +
+    const fmt = (v, d = 2) => v == null ? 'N/A' : v.toFixed(d);
+    console.log(`BCS: ${fmt(bcs, 1)} [${bcsQuality}] (K:${fmt(kuramoto)} E:${fmt(seResult.value)}${seResult.quality !== 'ok' ? `/${seResult.quality}` : ''} MI:${fmt(mutualInfo)})` +
       (this.phaseTransition.detected ? ` *** PHASE TRANSITION: +${this.phaseTransition.magnitude} ***` : ''));
   }
 

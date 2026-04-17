@@ -137,13 +137,19 @@ export class SessionRecorder {
     });
 
     // BCS: ~0.1 Hz (proof layer)
+    // Calibrated 2026-04-17 after session analysis: preserve null for
+    // no-measurement ticks instead of coercing to 0 — downstream consumers
+    // must distinguish "no measurement" from "zero measurement."
+    const round = (v, d) => v == null ? null : +v.toFixed(d);
     this._sub('Aetheria_BCS', (p) => {
       this._streams.bcs.push({
         t: this._relTime(p.timestamp),
-        bcs: +((p.bcs || 0).toFixed(1)),
-        kuramoto: +((p.kuramoto || 0).toFixed(3)),
-        sharedEnergy: +((p.sharedEnergy || 0).toFixed(3)),
-        mutualInfo: +((p.mutualInfo || 0).toFixed(3)),
+        bcs: round(p.bcs, 1),
+        bcsQuality: p.bcsQuality || null,
+        kuramoto: round(p.kuramoto, 3),
+        sharedEnergy: round(p.sharedEnergy, 3),
+        sharedEnergyQuality: p.sharedEnergyQuality || null,
+        mutualInfo: round(p.mutualInfo, 3),
         phaseTransition: p.phaseTransition?.detected || false
       });
     });
