@@ -396,10 +396,22 @@ export class PolicyEngine {
   }
 
   // Calibrated 2026-04-17 after session analysis: CLOSE_ON_SUSTAINED_PEAK — coherence has settled at a meaningful peak; close gracefully on success.
+  //
+  // The sustain floor uses a *trailing* max over the last trailing_max_windows
+  // prescriptions rather than the all-time session_max_tcs. Rationale:
+  // SUSTAIN asks "are we still performing at a high level?" which is naturally
+  // a recent question; an exceptional early peak should not permanently raise
+  // the bar beyond normal variance. The all-time session_max_tcs is still
+  // used as the significance gate ("did we ever reach a real peak?") — only
+  // the ratio floor is changed.
+  //
+  // STAGNATION continues to use session_max_tcs because it asks "did we fall
+  // far below our best?" which requires an all-time reference.
   _checkSustainedPeak() {
     const minDur = this.config.success_min_duration_sec ?? 360;
-    const ratio = this.config.sustain_ratio ?? 0.90;
+    const ratio = this.config.sustain_ratio ?? 0.85;
     const windows = this.config.sustain_windows ?? 2;
+    const trailingWindows = this.config.trailing_max_windows ?? 3;
     if (this.sessionDuration < minDur) return false;
     if (this._prescriptionPeaks.length < windows) return false;
 
@@ -409,12 +421,19 @@ export class PolicyEngine {
       : 65;
     if (this._sessionMaxTcs <= significantPeak) return false;
 
+    // Trailing-max reference: fall back to all-time session_max when fewer
+    // than trailing_max_windows prescriptions have completed.
+    const trailing = this._prescriptionPeaks.slice(-trailingWindows);
+    const trailingMax = trailing.length >= trailingWindows
+      ? Math.max(...trailing)
+      : this._sessionMaxTcs;
+
     const recent = this._prescriptionPeaks.slice(-windows);
-    const floor = ratio * this._sessionMaxTcs;
+    const floor = ratio * trailingMax;
     if (!recent.every(p => p >= floor)) return false;
 
     const recentStr = recent.map(p => p.toFixed(1)).join(', ');
-    this._enterClosing(`coherence held — closing on peak (session_max=${this._sessionMaxTcs.toFixed(1)}, recent_peaks=[${recentStr}])`);
+    this._enterClosing(`coherence held — closing on peak (session_max=${this._sessionMaxTcs.toFixed(1)}, trailing_max=${trailingMax.toFixed(1)}, recent_peaks=[${recentStr}])`);
     return true;
   }
 
