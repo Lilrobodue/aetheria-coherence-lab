@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -300,6 +300,13 @@
         background: var(--bg-primary);
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        /* Respect the Android/iOS bottom inset (gesture-nav home indicator
+           or 3-button nav bar) so the last scrollable item — Hide Signals
+           label and the fNIRS plot at the end of the signals stack — is
+           never flush against system chrome. 16px baseline + env() inset
+           so phones without an inset still get a visible buffer. */
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        scroll-padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
       }
 
       /* --- Header: wrap controls below title --- */
