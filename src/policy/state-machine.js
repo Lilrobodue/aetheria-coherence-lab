@@ -46,6 +46,11 @@ export class PolicyEngine {
     this._prescriptionPeaks = [];
     // Calibrated 2026-04-17 after session analysis: prescription index (1-based) that most recently updated _sessionMaxTcs; drives CLOSE_ON_STAGNATION.
     this._prescriptionOfSessionMax = 0;
+    // Rolling buffer of recent BCS samples for CLOSE_ON_UNIFIED_COHERENCE.
+    // Stored as { t (session-relative), bcs (number|null), bcsQuality }.
+    // Trimmed to ~30 samples (~5 min at 0.1 Hz) to cover any reasonable
+    // unified_bcs_window_sec.
+    this._bcsSamples = [];
     this._goalSustainStart = null;
     this._hugPeakTcs = 0;
     this._hugPeakLostSince = null;
@@ -73,6 +78,15 @@ export class PolicyEngine {
       this.bus.subscribe('Aetheria_Coherence', (p) => { this._latestCoherence = p; }),
       this.bus.subscribe('Aetheria_Features', (p) => {
         if (p.type === 'all_features') this._latestFeatures = p;
+      }),
+      // Calibrated 2026-04-17: buffer BCS samples for CLOSE_ON_UNIFIED_COHERENCE.
+      this.bus.subscribe('Aetheria_BCS', (p) => {
+        this._bcsSamples.push({
+          t: this.sessionDuration,
+          bcs: p.bcs,
+          bcsQuality: p.bcsQuality || null
+        });
+        if (this._bcsSamples.length > 30) this._bcsSamples.shift();
       })
     );
 
@@ -344,12 +358,14 @@ export class PolicyEngine {
     }
 
     // Calibrated 2026-04-17 after session analysis: on prescription end (PIVOT/ADVANCE), record the window peak and run the close checks before dispatching.
+    // Evaluation order: unified (preferred) → sustained-peak (TCS only) → stagnation.
     if (result.decision === 'PIVOT' || result.decision === 'ADVANCE') {
       this._prescriptionPeaks.push(this._tcsMaxInState);
       if (this._tcsMaxInState > this._sessionMaxTcs) {
         this._sessionMaxTcs = this._tcsMaxInState;
         this._prescriptionOfSessionMax = this._frequencyHistory.length;
       }
+      if (this._checkUnifiedCoherence()) return;
       if (this._checkSustainedPeak()) return;
       if (this._checkStagnation()) return;
     }
@@ -393,6 +409,65 @@ export class PolicyEngine {
       this._transition('COMPLETE', `Hug complete. Peak TCS: ${this._hugPeakTcs.toFixed(0)}, held for ${duration.toFixed(0)}s`);
       this._finish();
     }
+  }
+
+  // Calibrated 2026-04-17 after session analysis: CLOSE_ON_UNIFIED_COHERENCE —
+  // the therapeutically ideal outcome. TCS sustained at a significant peak
+  // AND BCS sustained at unity-coherence magnitude over the trailing window.
+  // Preferred over SUSTAINED_PEAK when both would fire, because it's a
+  // strictly stronger claim.
+  //
+  // Tick handling for BCS samples in the trailing window:
+  //   - { quality: 'full',  bcs >= threshold } → counts as valid sustain tick
+  //   - { quality: 'full',  bcs <  threshold } → counts as valid, fails gate
+  //                                              (correct for Path C "no
+  //                                              shared modes" legitimate zeros)
+  //   - { quality: 'partial' }    → skip, don't count, don't fail
+  //   - { quality: 'unavailable' }→ skip, don't count, don't fail
+  _checkUnifiedCoherence() {
+    const minDur = this.config.unified_min_duration_sec ?? 360;
+    if (this.sessionDuration < minDur) return false;
+
+    // TCS portion (identical to SUSTAINED_PEAK gate stack)
+    const peakK = this.config.peak_significance_k ?? 1.5;
+    const significantPeak = (this._baselineTcsMean != null && this._baselineTcsStd != null)
+      ? this._baselineTcsMean + peakK * this._baselineTcsStd
+      : 65;
+    if (this._sessionMaxTcs <= significantPeak) return false;
+
+    const sustainRatio = this.config.sustain_ratio ?? 0.85;
+    const sustainWindows = this.config.sustain_windows ?? 2;
+    const trailingWindows = this.config.trailing_max_windows ?? 3;
+    if (this._prescriptionPeaks.length < sustainWindows) return false;
+    const trailing = this._prescriptionPeaks.slice(-trailingWindows);
+    const trailingMax = trailing.length >= trailingWindows
+      ? Math.max(...trailing)
+      : this._sessionMaxTcs;
+    if (trailingMax <= significantPeak) return false;
+    const recentTcs = this._prescriptionPeaks.slice(-sustainWindows);
+    const tcsFloor = sustainRatio * trailingMax;
+    if (!recentTcs.every(p => p >= tcsFloor)) return false;
+
+    // BCS portion
+    const bcsWindowSec = this.config.unified_bcs_window_sec ?? 120;
+    const minValid = this.config.unified_bcs_min_valid_samples ?? 12;
+    const bcsSustainRatio = this.config.unified_bcs_sustain_ratio ?? 0.85;
+    const bcsThreshold = this.config.bcs_significance_threshold ?? 70;
+
+    const now = this.sessionDuration;
+    const inWindow = this._bcsSamples.filter(b => now - b.t <= bcsWindowSec);
+    const valid = inWindow.filter(b =>
+      b.bcsQuality === 'full' && b.bcs != null && isFinite(b.bcs)
+    );
+    if (valid.length < minValid) return false;
+    const above = valid.filter(b => b.bcs >= bcsThreshold);
+    if (above.length / valid.length < bcsSustainRatio) return false;
+
+    const bcsMean = valid.reduce((a, b) => a + b.bcs, 0) / valid.length;
+    this._enterClosing(
+      `unified coherence held — TCS sustained=${recentTcs.length}/${sustainWindows}, BCS valid=${valid.length}, BCS above-threshold=${above.length}/${valid.length} (session_max_tcs=${this._sessionMaxTcs.toFixed(1)}, bcs_mean=${bcsMean.toFixed(1)})`
+    );
+    return true;
   }
 
   // Calibrated 2026-04-17 after session analysis: CLOSE_ON_SUSTAINED_PEAK — coherence has settled at a meaningful peak; close gracefully on success.
