@@ -102,27 +102,46 @@ test('fallback: < trailing_max_windows peaks → uses all-time session_max', () 
   assert.equal(r.sustainedFired, true, 'fallback to session_max, 78 ≥ 73.1');
 });
 
-test('strictly declining peaks → STAGNATION (sustain blocked by variance)', () => {
-  // Peaks [86, 82, 77, 60, 50, 40]: strictly decreasing with acceleration.
-  // Trailing-max of last 3 = 60; floor = 0.85 * 60 = 51. Last 2 peaks
-  // (50, 40): 40 < 51 → sustain fails. STAGNATION: mean(60, 50, 40) = 50
+test('strictly declining peaks → STAGNATION (trailing_max below significance)', () => {
+  // Peaks [86, 82, 77, 60, 50, 40]: strictly decreasing. Baseline μ=62, σ=6
+  // → significance=71. Trailing_max of last 3 = 60 which is below 71, so
+  // the Commit 11 gate blocks SUSTAIN. STAGNATION: mean(60, 50, 40) = 50
   // < 0.80 * 86 = 68.8 → fires.
-  //
-  // Note: if peaks decline to a *steady* low plateau (e.g., [86, 82, 77,
-  // 52, 55, 53]) the trailing-max fix can let SUSTAIN fire on the low
-  // plateau because trailing_max follows the peaks down. That's within
-  // the spec's intent — SUSTAIN asks "are we still performing at a high
-  // level" with "high level" defined relative to recent windows. If a
-  // stricter interpretation is wanted, trailing_max could also be gated
-  // against peak_significance_threshold.
   const r = runScenario({
     peaks: [86, 82, 77, 60, 50, 40],
     baselineMean: 62, baselineStd: 6,
     sessionDurationSec: 500
   });
-  assert.equal(r.sustainedFired, false, 'SUSTAIN should not fire — last peak 40 breaks floor 51');
+  assert.equal(r.sustainedFired, false, 'SUSTAIN blocked — trailing_max 60 < significance 71');
   assert.equal(r.stagnationFired, true, 'STAGNATION should fire — mean recent 50 < floor 68.8');
   assert.match(r.reason, /mean_recent_peaks/, 'reason should include mean');
+});
+
+test('peaks high then settles low plateau → STAGNATION (Commit 11 fix)', () => {
+  // The exact failure mode Commit 11 addresses: early exceptional peak
+  // followed by a tight low plateau. Without the trailing_max gate,
+  // trailing_max would follow down to ~58, floor ≈ 49, and the 54-58
+  // peaks would clear it — mislabeling stagnation as SUSTAINED_PEAK.
+  // With the gate: trailing_max=58 < significance=71 → SUSTAIN blocked.
+  const r = runScenario({
+    peaks: [86, 82, 77, 54, 56, 58],
+    baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: 500
+  });
+  assert.equal(r.sustainedFired, false, 'SUSTAIN blocked — trailing_max 58 < significance 71');
+  assert.equal(r.stagnationFired, true, 'STAGNATION should fire on low plateau');
+});
+
+test('peaks high then holds high → SUSTAINED_PEAK (regression guard)', () => {
+  // Inverse of the above: peaks remain above significance throughout.
+  // trailing_max stays well above 71. sustain fires.
+  const r = runScenario({
+    peaks: [86, 85, 83, 85, 84, 86],
+    baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: 500
+  });
+  assert.equal(r.sustainedFired, true, 'SUSTAINED_PEAK should fire on held-high');
+  assert.equal(r.stagnationFired, false, 'STAGNATION should not fire');
 });
 
 test('peaks holding near all-time max → neither fires (normal session)', () => {

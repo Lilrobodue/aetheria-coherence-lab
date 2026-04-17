@@ -345,6 +345,7 @@ function runSimulation(baseProfile, label, opts = {}) {
         let gatedBy = null;
         if (sessionT < successMinDur) gatedBy = 'min-duration';
         else if (sessionMaxTcs <= significantPeakValue) gatedBy = 'peak-below-threshold';
+        else if (trailingMax <= significantPeakValue) gatedBy = 'trailing-below-threshold';
         else if (recent.length < sustainWindows) gatedBy = 'not-enough-peaks';
         else if (!recent.every(p => p >= floor)) gatedBy = 'peak-below-floor';
         else { sustainPassed = true; gatedBy = 'passed'; }
