@@ -9,10 +9,16 @@
 //   Commit 1 — baseline-relative peak threshold
 //   Commit 2 — slope-veto on low-confidence pivots
 //   Commit 3 — adaptive ENTRAIN window (30s -> 45s)
-//   Commit 4 — pivot budget raised 3 -> 4
+//   Commit 6 — CLOSE_ON_SUSTAINED_PEAK success rule
+//   Commit 7 — CLOSE_ON_STAGNATION (replaces pivot budget)
+//   Commit 8 — 15 min time cap safety net
 //
-// Commit 5 (phase-transition warmup) lives in bcs-engine.js and does not
-// affect policy decisions; omitted from this sim.
+// Pre-patch BEFORE run uses absolute 65 threshold, no slope veto, 3-pivot
+// budget close, 30 min cap — same as before the first calibration commit.
+//
+// Commits 4 (pivot_budget) and 5 (phase-transition warmup) are omitted:
+// Commit 4's path is removed by Commit 7; Commit 5 lives in bcs-engine.js
+// and does not affect policy decisions.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -164,35 +170,54 @@ function runSimulation(baseProfile, label, opts = {}) {
   const baselineTcsMean = mean(baseline);
   const baselineTcsStd = Math.max(std(baseline), stdFloor);
 
-  const pivotBudget = usePrePatchLogic
-    ? 3
-    : (config.pivot_budget ?? config.max_consecutive_pivots ?? 4);
+  const peakK = config.peak_significance_k ?? 1.5;
+  const significantPeakValue = usePrePatchLogic ? 65 : (baselineTcsMean + peakK * baselineTcsStd);
+
+  const pivotBudgetOld = 3; // pre-patch only
   const baseMin = config.entrain_min_duration_sec ?? 30;
   const extMin = config.entrain_extended_min_duration_sec ?? 45;
-  const maxSession = config.session_max_duration_sec ?? 1800;
+  // pre-patch used the old 30 min cap; new path uses the post-Commit 8 15 min cap
+  const maxSession = usePrePatchLogic ? 1800 : (config.session_max_duration_sec ?? 900);
   const declineThreshold = config.decline_from_peak_threshold ?? 10;
+
+  const successMinDur = config.success_min_duration_sec ?? 360;
+  const sustainRatio = config.sustain_ratio ?? 0.90;
+  const sustainWindows = config.sustain_windows ?? 2;
+  const stagnationMinRx = config.stagnation_min_prescriptions ?? 6;
+  const stagnationWindows = config.stagnation_windows ?? 3;
 
   const metrics = {
     label,
     profile: profile.name,
     baselineTcsMean: baselineTcsMean.toFixed(1),
     baselineTcsStd: baselineTcsStd.toFixed(1),
-    significantPeak: usePrePatchLogic ? 65 : (baselineTcsMean + (config.peak_significance_k ?? 1.5) * baselineTcsStd).toFixed(1),
+    significantPeak: significantPeakValue.toFixed(1),
     sessionDurationSec: 0,
     prescriptionsPlayed: 0,
     pivotCount: 0,
     slopeVetoCount: 0,
     advanceCount: 0,
     holdCount: 0,
+    sessionMaxTcs: 0,
+    closingRule: null,    // 'SUSTAINED_PEAK' | 'STAGNATION' | 'TIME_CAP' | 'PIVOT_BUDGET'
     closingReason: null,
-    timeline: [] // short summary per prescription
+    timeline: []
   };
 
   let sessionT = config.baseline_duration_sec ?? 90;
-  let consecutivePivots = 0;
+  let consecutivePivots = 0; // pre-patch only
   let hasPivotedEver = false;
-  let lastHint = 'PIVOT'; // first prescription treated as fresh selection
+  let sessionMaxTcs = 0;
+  const prescriptionPeaks = [];
+  let prescriptionOfSessionMax = 0;
+  let lastHint = 'PIVOT';
   let closed = false;
+
+  function closeWith(rule, reason) {
+    metrics.closingRule = rule;
+    metrics.closingReason = reason;
+    closed = true;
+  }
 
   prescriptionLoop:
   while (sessionT < maxSession && !closed) {
@@ -240,8 +265,7 @@ function runSimulation(baseProfile, label, opts = {}) {
         t++;
         sessionT++;
         if (sessionT >= maxSession) {
-          metrics.closingReason = 'Time cap reached';
-          closed = true;
+          closeWith('TIME_CAP', usePrePatchLogic ? 'Time cap reached' : 'Time cap reached (safety net)');
           break;
         }
         const windowDur = t - windowStartT;
@@ -277,23 +301,51 @@ function runSimulation(baseProfile, label, opts = {}) {
         reason: result.reason
       });
 
-      // Mirror state-machine.js: counter updates every EVALUATE call
+      // Counters (match state-machine.js)
       if (result.decision === 'PIVOT') {
-        consecutivePivots++;
         hasPivotedEver = true;
         metrics.pivotCount++;
-      } else {
+        if (usePrePatchLogic) consecutivePivots++;
+      } else if (usePrePatchLogic) {
         consecutivePivots = 0;
       }
       if (result.decision === 'ADVANCE') metrics.advanceCount++;
       if (result.decision === 'HOLD' && !result.appliedSlopeVeto) metrics.holdCount++;
       if (result.appliedSlopeVeto) metrics.slopeVetoCount++;
 
-      // CLOSING: consecutive pivot budget
-      if (consecutivePivots >= pivotBudget) {
-        metrics.closingReason = `${pivotBudget} consecutive pivots — diminishing returns`;
-        closed = true;
+      // Pre-patch closing: consecutive pivot budget (3)
+      if (usePrePatchLogic && consecutivePivots >= pivotBudgetOld) {
+        closeWith('PIVOT_BUDGET', `${pivotBudgetOld} consecutive pivots — diminishing returns`);
         break;
+      }
+
+      // New-logic closing: on prescription end, check sustained-peak then stagnation
+      if (!usePrePatchLogic && (result.decision === 'PIVOT' || result.decision === 'ADVANCE')) {
+        prescriptionPeaks.push(tcsMaxInState);
+        if (tcsMaxInState > sessionMaxTcs) {
+          sessionMaxTcs = tcsMaxInState;
+          prescriptionOfSessionMax = metrics.prescriptionsPlayed;
+        }
+
+        // CLOSE_ON_SUSTAINED_PEAK
+        if (
+          sessionT >= successMinDur &&
+          sessionMaxTcs > significantPeakValue &&
+          prescriptionPeaks.length >= sustainWindows &&
+          prescriptionPeaks.slice(-sustainWindows).every(p => p >= sustainRatio * sessionMaxTcs)
+        ) {
+          const recent = prescriptionPeaks.slice(-sustainWindows).map(p => p.toFixed(1)).join(', ');
+          closeWith('SUSTAINED_PEAK',
+            `coherence held — closing on peak (session_max=${sessionMaxTcs.toFixed(1)}, recent_peaks=[${recent}])`);
+          break;
+        }
+
+        // CLOSE_ON_STAGNATION
+        const rxSincePeak = metrics.prescriptionsPlayed - prescriptionOfSessionMax;
+        if (metrics.prescriptionsPlayed >= stagnationMinRx && rxSincePeak >= stagnationWindows) {
+          closeWith('STAGNATION', `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak})`);
+          break;
+        }
       }
 
       // Dispatch
@@ -304,9 +356,42 @@ function runSimulation(baseProfile, label, opts = {}) {
       }
       if (result.decision === 'HOLD') {
         inExtension = true;
+        // Sim-only drift proxy: the real engine's ArousalAnchor.updateDrift() will
+        // force a PIVOT after sustained drift on a flat prescription. The sim
+        // doesn't model drift, so without a cap a low-gain freq at a mid-range
+        // baseline HOLDs forever. Cap HOLDs per prescription at 3 and escalate
+        // to PIVOT with the same machinery the state machine would use.
+        prescriptionSummary.holdsSoFar = (prescriptionSummary.holdsSoFar || 0) + 1;
+        if (prescriptionSummary.holdsSoFar >= 3) {
+          metrics.pivotCount++;
+          hasPivotedEver = true;
+          if (usePrePatchLogic) consecutivePivots++;
+          prescriptionSummary.decisions.push({
+            t: sessionT, tcsNow: V.tcs.toFixed(1), tcsMax: tcsMaxInState.toFixed(1),
+            decision: 'PIVOT', veto: false,
+            reason: '[sim drift proxy] HOLD cap reached — arousal anchor would flip'
+          });
+          if (usePrePatchLogic && consecutivePivots >= pivotBudgetOld) {
+            closeWith('PIVOT_BUDGET', `${pivotBudgetOld} consecutive pivots — diminishing returns`);
+            break;
+          }
+          if (!usePrePatchLogic) {
+            prescriptionPeaks.push(tcsMaxInState);
+            if (tcsMaxInState > sessionMaxTcs) {
+              sessionMaxTcs = tcsMaxInState;
+              prescriptionOfSessionMax = metrics.prescriptionsPlayed;
+            }
+            const rxSincePeak = metrics.prescriptionsPlayed - prescriptionOfSessionMax;
+            if (metrics.prescriptionsPlayed >= stagnationMinRx && rxSincePeak >= stagnationWindows) {
+              closeWith('STAGNATION', `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak})`);
+              break;
+            }
+          }
+          lastHint = 'PIVOT';
+          break;
+        }
         continue;
       }
-      // ADVANCE or PIVOT -> next prescription
       lastHint = result.decision;
       break;
     }
@@ -315,8 +400,11 @@ function runSimulation(baseProfile, label, opts = {}) {
     if (closed) break prescriptionLoop;
   }
 
-  if (!metrics.closingReason) metrics.closingReason = 'Time cap reached';
+  if (!closed) {
+    closeWith('TIME_CAP', usePrePatchLogic ? 'Time cap reached' : 'Time cap reached (safety net)');
+  }
   metrics.sessionDurationSec = sessionT;
+  metrics.sessionMaxTcs = sessionMaxTcs;
   return metrics;
 }
 
@@ -327,10 +415,12 @@ function printSummary(m) {
   console.log(`  [${m.label}]`);
   console.log(`    baseline TCS μ=${m.baselineTcsMean}, σ=${m.baselineTcsStd}, significant peak threshold=${m.significantPeak}`);
   console.log(`    session duration    : ${fmtMin(m.sessionDurationSec)}`);
+  console.log(`    session max TCS     : ${m.sessionMaxTcs.toFixed(1)}`);
   console.log(`    prescriptions played: ${m.prescriptionsPlayed}`);
   console.log(`    pivots fired        : ${m.pivotCount}`);
   console.log(`    slope-vetoes fired  : ${m.slopeVetoCount}`);
   console.log(`    advances / holds    : ${m.advanceCount} / ${m.holdCount}`);
+  console.log(`    closing rule        : ${m.closingRule}`);
   console.log(`    closing reason      : ${m.closingReason}`);
 }
 
@@ -369,10 +459,12 @@ const profiles = [
 console.log('='.repeat(72));
 console.log('PRESCRIPTION ENGINE CALIBRATION SIMULATION');
 console.log('='.repeat(72));
-console.log(`pivot budget (new/old): ${config.pivot_budget ?? 4} / 3`);
 console.log(`ENTRAIN window (base/ext): ${config.entrain_min_duration_sec}s / ${config.entrain_extended_min_duration_sec}s`);
 console.log(`peak significance K: ${config.peak_significance_k}  (threshold = μ + K·σ)`);
 console.log(`slope-veto threshold: +${config.slope_veto_threshold} TCS across window (mean last 5 − mean first 5)`);
+console.log(`CLOSE_ON_SUSTAINED_PEAK: t≥${config.success_min_duration_sec}s, last ${config.sustain_windows} peaks ≥ ${Math.round(config.sustain_ratio * 100)}% of session_max`);
+console.log(`CLOSE_ON_STAGNATION: ≥${config.stagnation_min_prescriptions} Rx, no session_max update in ${config.stagnation_windows} windows`);
+console.log(`time cap (new/old): ${config.session_max_duration_sec}s / 1800s (safety net)`);
 console.log();
 
 for (const p of profiles) {
