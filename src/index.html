@@ -403,6 +403,77 @@
       /* --- Panel titles: slightly larger --- */
       .panel-title { font-size: 12px; }
     }
+
+    /* ===== Links Modal ===== */
+    #links-modal .modal-content { max-width: 560px; padding: 32px 24px; }
+    #links-modal .links-section-label {
+      font-size: 10px; color: var(--text-dim); letter-spacing: 3px;
+      text-transform: uppercase; text-align: center;
+      margin: 24px 0 10px; position: relative;
+    }
+    #links-modal .links-section-label::before,
+    #links-modal .links-section-label::after {
+      content: ''; position: absolute; top: 50%;
+      width: 50px; height: 1px; background: var(--border);
+    }
+    #links-modal .links-section-label::before { right: calc(50% + 70px); }
+    #links-modal .links-section-label::after { left: calc(50% + 70px); }
+    #links-modal .link-card {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px 14px; margin-bottom: 6px;
+      text-decoration: none; color: var(--text-primary);
+      transition: all 0.2s; position: relative;
+    }
+    #links-modal .link-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 2px 12px rgba(124,77,255,0.15);
+    }
+    #links-modal .link-card::after {
+      content: '↗'; position: absolute; right: 14px;
+      color: var(--text-dim); font-size: 13px; transition: all 0.2s;
+    }
+    #links-modal .link-card:hover::after { color: var(--accent); right: 10px; }
+    #links-modal .link-icon {
+      width: 34px; height: 34px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+    }
+    #links-modal .link-text { flex: 1; }
+    #links-modal .link-text h3 {
+      font-size: 12px; font-weight: bold; letter-spacing: 0.5px;
+      margin-bottom: 2px; color: var(--text-primary);
+    }
+    #links-modal .link-text p {
+      font-size: 10px; color: var(--text-secondary);
+      line-height: 1.4; margin: 0;
+    }
+    #links-modal .ic-gold { background: linear-gradient(135deg,#d4a57422,#d4a57408); border: 1px solid #d4a57444; }
+    #links-modal .ic-pur { background: linear-gradient(135deg,#7c4dff22,#7c4dff08); border: 1px solid #7c4dff44; }
+    #links-modal .ic-mag { background: linear-gradient(135deg,#A840B822,#A840B808); border: 1px solid #A840B844; }
+    #links-modal .ic-blu { background: linear-gradient(135deg,#42a5f522,#42a5f508); border: 1px solid #42a5f544; }
+    #links-modal .ic-grn { background: linear-gradient(135deg,#4caf5022,#4caf5008); border: 1px solid #4caf5044; }
+    #links-modal .ic-coral { background: linear-gradient(135deg,#C43A6A22,#C43A6A08); border: 1px solid #C43A6A44; }
+    #links-modal .ic-ora { background: linear-gradient(135deg,#ff980022,#ff980008); border: 1px solid #ff980044; }
+    #links-modal .sim-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 6px; margin-bottom: 6px;
+    }
+    #links-modal .sim-card {
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px; text-decoration: none;
+      color: var(--text-primary); transition: all 0.2s; text-align: center;
+    }
+    #links-modal .sim-card:hover {
+      border-color: var(--head-color);
+      box-shadow: 0 2px 12px rgba(66,165,245,0.15);
+    }
+    #links-modal .sim-card .sim-icon { font-size: 20px; margin-bottom: 4px; }
+    #links-modal .sim-card h3 { font-size: 11px; font-weight: bold; line-height: 1.3; }
+    #links-modal .sim-card p { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+    @media (max-width: 360px) {
+      #links-modal .sim-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -559,13 +630,174 @@
   </div>
 </div>
 
+<!-- Links & Resources Modal -->
+<div id="links-modal" class="modal-overlay hidden">
+  <div class="modal-content">
+    <h1>Links &amp; Resources</h1>
+    <p style="text-align:center;font-style:italic;color:var(--text-dim);margin-top:-20px;margin-bottom:8px;">The Aetheria ecosystem</p>
+
+    <div class="links-section-label">Apps &amp; Tools</div>
+
+    <a class="link-card" href="https://aetheria432.com" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-gold">&#127925;</div>
+      <div class="link-text">
+        <h3>Aetheria 432Hz Player</h3>
+        <p>27-frequency harmonic healing system</p>
+      </div>
+    </a>
+
+    <a class="link-card" href="https://aetheriarct.com" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-pur">&#129504;</div>
+      <div class="link-text">
+        <h3>Aetheria RCT</h3>
+        <p>Muse 2 EEG neuro-adaptive coherence training</p>
+      </div>
+    </a>
+
+    <a class="link-card" href="https://aetheria-session-tagger.org" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-grn">&#127991;&#65039;</div>
+      <div class="link-text">
+        <h3>Aetheria Session Tagger</h3>
+        <p>Add subjective context to your Coherence Lab sessions</p>
+      </div>
+    </a>
+
+    <div class="links-section-label">Sophia</div>
+
+    <a class="link-card" href="https://aetheriasos.com" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-mag">&#128302;</div>
+      <div class="link-text">
+        <h3>Sophia</h3>
+        <p>Your personal AI companion &mdash; runs locally, no cloud</p>
+      </div>
+    </a>
+
+    <div class="links-section-label">Books</div>
+
+    <a class="link-card" href="https://a.co/d/079tM297" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-mag">&#128214;</div>
+      <div class="link-text">
+        <h3>Aetheria</h3>
+        <p>The frequency healing system &mdash; foundational text</p>
+      </div>
+    </a>
+
+    <a class="link-card" href="https://a.co/d/0c83ZGEu" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-blu">&#128218;</div>
+      <div class="link-text">
+        <h3>The Golden Thread</h3>
+        <p>One equation across all scales &mdash; E=hf as universal key</p>
+      </div>
+    </a>
+
+    <a class="link-card" href="https://a.co/d/0ckEN0Qs" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-ora">&#128213;</div>
+      <div class="link-text">
+        <h3>Cosmic Rhythms</h3>
+        <p>How sun, moon &amp; earth shape your biology</p>
+      </div>
+    </a>
+
+    <a class="link-card" href="https://a.co/d/04Y1pUtE" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-coral">&#128215;</div>
+      <div class="link-text">
+        <h3>SFB &mdash; A TBI Guide</h3>
+        <p>Navigating traumatic brain injury recovery</p>
+      </div>
+    </a>
+
+    <div class="links-section-label">Music</div>
+
+    <a class="link-card" href="https://open.spotify.com/artist/4CXB2ctrUCvInDQkKDhw4q" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-grn">&#127911;</div>
+      <div class="link-text">
+        <h3>Aetheria on Spotify</h3>
+        <p>Frequency-tuned healing music &mdash; 432Hz</p>
+      </div>
+    </a>
+
+    <div class="links-section-label">Interactive Simulations</div>
+
+    <div class="sim-grid">
+      <a class="sim-card" href="https://lilrobodue.github.io/Lewis-Vortex-Model/" target="_blank" rel="noopener noreferrer">
+        <div class="sim-icon">&#127744;</div>
+        <h3>Lewis Vortex Model</h3>
+        <p>Formation Theory</p>
+      </a>
+      <a class="sim-card" href="https://lilrobodue.github.io/Unified-Scale-Navigator/" target="_blank" rel="noopener noreferrer">
+        <div class="sim-icon">&#128300;</div>
+        <h3>Unified Scale Navigator</h3>
+        <p>Quantum to cosmic</p>
+      </a>
+      <a class="sim-card" href="https://lilrobodue.github.io/HRV-Coherence-Visualizer/" target="_blank" rel="noopener noreferrer">
+        <div class="sim-icon">&#128147;</div>
+        <h3>HRV Coherence Visualizer</h3>
+        <p>Heart rate variability</p>
+      </a>
+      <a class="sim-card" href="https://lilrobodue.github.io/Schumann-Biology-Simulator/" target="_blank" rel="noopener noreferrer">
+        <div class="sim-icon">&#127758;</div>
+        <h3>Schumann Biology Simulator</h3>
+        <p>Earth's resonance</p>
+      </a>
+      <a class="sim-card" href="https://lilrobodue.github.io/Cellular-Voltage-Frequency-Model/" target="_blank" rel="noopener noreferrer">
+        <div class="sim-icon">&#9889;</div>
+        <h3>Cellular Voltage Model</h3>
+        <p>Frequency &amp; cell health</p>
+      </a>
+      <a class="sim-card" href="https://lilrobodue.github.io/Galactic-Scale-Vortex-Formation/" target="_blank" rel="noopener noreferrer">
+        <div class="sim-icon">&#128296;</div>
+        <h3>Galactic Vortex Formation</h3>
+        <p>Cosmic scale structure</p>
+      </a>
+    </div>
+
+    <div class="links-section-label">Community &amp; Social</div>
+
+    <a class="link-card" href="https://discord.gg/ddR3MfgCsM" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-blu">&#128172;</div>
+      <div class="link-text">
+        <h3>Th3 L0unG3 &mdash; Discord</h3>
+        <p>365+ healing frequency songs &middot; community &middot; resources</p>
+      </div>
+    </a>
+
+    <a class="link-card" href="https://www.youtube.com/@Aetheria432" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-coral">&#9654;</div>
+      <div class="link-text">
+        <h3>YouTube</h3>
+        <p>Aetheria content, demos, and explorations</p>
+      </div>
+    </a>
+
+    <a class="link-card" href="https://x.com/TheyCallmeJobo" target="_blank" rel="noopener noreferrer">
+      <div class="link-icon ic-ora">&#128038;</div>
+      <div class="link-text">
+        <h3>X / Twitter</h3>
+        <p>@TheyCallmeJobo &mdash; thoughts, updates, frequencies</p>
+      </div>
+    </a>
+
+    <div class="links-section-label">Contact</div>
+
+    <a class="link-card" href="mailto:Aetheria432@pm.me">
+      <div class="link-icon ic-gold">&#9993;</div>
+      <div class="link-text">
+        <h3>Aetheria432@pm.me</h3>
+        <p>Questions, collaborations, research inquiries</p>
+      </div>
+    </a>
+
+    <button id="links-close" class="modal-btn">Close</button>
+  </div>
+</div>
+
 <div class="app">
 
   <!-- Header -->
   <div class="header">
     <div class="header-title">Aetheria Coherence Lab</div>
     <div class="header-controls">
-      <a href="links.html" class="btn btn-guide" title="Links & Resources" style="text-decoration:none">&#9741;</a>
+      <button id="btn-links" class="btn btn-guide" title="Links & Resources">&#9741;</button>
       <button id="btn-guide" class="btn btn-guide" title="Getting Started Guide">?</button>
       <button id="btn-connect-h10" class="btn btn-connect">Connect H10</button>
       <button id="btn-connect-muse" class="btn btn-connect">Connect Muse</button>
@@ -681,6 +913,21 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !tutorial.classList.contains('hidden')) {
         tutorial.classList.add('hidden');
+      }
+    });
+
+    // Links & Resources — toggled via header "☍" button
+    const linksModal = document.getElementById('links-modal');
+    document.getElementById('btn-links').addEventListener('click', () => {
+      linksModal.classList.remove('hidden');
+      linksModal.scrollTop = 0;
+    });
+    document.getElementById('links-close').addEventListener('click', () => {
+      linksModal.classList.add('hidden');
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !linksModal.classList.contains('hidden')) {
+        linksModal.classList.add('hidden');
       }
     });
   })();
