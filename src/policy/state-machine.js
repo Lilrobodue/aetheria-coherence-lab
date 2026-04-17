@@ -36,7 +36,6 @@ export class PolicyEngine {
     this._tcsAtEntry = 0;
     this._tcsMaxInState = 0;
     this._entryVector = null;
-    this._consecutivePivots = 0;
     // Calibrated 2026-04-17 after session analysis: allow at most one slope-veto extension per prescription.
     this._slopeVetoUsed = false;
     // Calibrated 2026-04-17 after session analysis: adaptive ENTRAIN window — base 30s, 45s on extension or after the first pivot of the session.
@@ -45,6 +44,8 @@ export class PolicyEngine {
     // Calibrated 2026-04-17 after session analysis: track session-max TCS and per-prescription peaks for CLOSE_ON_SUSTAINED_PEAK.
     this._sessionMaxTcs = 0;
     this._prescriptionPeaks = [];
+    // Calibrated 2026-04-17 after session analysis: prescription index (1-based) that most recently updated _sessionMaxTcs; drives CLOSE_ON_STAGNATION.
+    this._prescriptionOfSessionMax = 0;
     this._goalSustainStart = null;
     this._hugPeakTcs = 0;
     this._hugPeakLostSince = null;
@@ -337,22 +338,20 @@ export class PolicyEngine {
       this._slopeVetoUsed = true;
     }
 
-    // Track consecutive pivots
+    // Calibrated 2026-04-17 after session analysis: once any pivot has occurred, all subsequent base ENTRAIN windows extend to 45s.
     if (result.decision === 'PIVOT') {
-      this._consecutivePivots++;
-      // Calibrated 2026-04-17 after session analysis: once any pivot has occurred, all subsequent base ENTRAIN windows extend to 45s.
       this._hasPivotedEver = true;
-    } else {
-      this._consecutivePivots = 0;
     }
 
-    // Calibrated 2026-04-17 after session analysis: on prescription end (PIVOT/ADVANCE), record the window peak and run the close-on-sustained-peak check before dispatching.
+    // Calibrated 2026-04-17 after session analysis: on prescription end (PIVOT/ADVANCE), record the window peak and run the close checks before dispatching.
     if (result.decision === 'PIVOT' || result.decision === 'ADVANCE') {
       this._prescriptionPeaks.push(this._tcsMaxInState);
       if (this._tcsMaxInState > this._sessionMaxTcs) {
         this._sessionMaxTcs = this._tcsMaxInState;
+        this._prescriptionOfSessionMax = this._frequencyHistory.length;
       }
       if (this._checkSustainedPeak()) return;
+      if (this._checkStagnation()) return;
     }
 
     if (result.decision === 'HOLD') {
@@ -423,8 +422,6 @@ export class PolicyEngine {
     const maxDuration = this.config.session_max_duration_sec || 1800;
     const goalTcs = this.config.goal_tcs_threshold || 80;
     const goalSustain = this.config.goal_sustain_duration_sec || 60;
-    // Calibrated 2026-04-17 after session analysis: raised budget 3 → 4; three sessions closed at the prior cap before frequencies had converged.
-    const maxPivots = this.config.pivot_budget ?? this.config.max_consecutive_pivots ?? 4;
 
     // Time cap
     if (this.sessionDuration >= maxDuration) {
@@ -443,13 +440,19 @@ export class PolicyEngine {
       this._goalSustainStart = null;
     }
 
-    // Diminishing returns: 3 consecutive pivots
-    if (this._consecutivePivots >= maxPivots) {
-      this._enterClosing(`${maxPivots} consecutive pivots — diminishing returns`);
-      return true;
-    }
-
     return false;
+  }
+
+  // Calibrated 2026-04-17 after session analysis: CLOSE_ON_STAGNATION — session_max hasn't moved in N prescriptions and enough have been tried; replaces the old pivot-budget path, which no longer reliably fires.
+  _checkStagnation() {
+    const minRx = this.config.stagnation_min_prescriptions ?? 6;
+    const windows = this.config.stagnation_windows ?? 3;
+    const rxPlayed = this._frequencyHistory.length;
+    if (rxPlayed < minRx) return false;
+    const rxSincePeak = rxPlayed - this._prescriptionOfSessionMax;
+    if (rxSincePeak < windows) return false;
+    this._enterClosing(`no further gains — diminishing returns (Rx_since_peak=${rxSincePeak})`);
+    return true;
   }
 
   _enterClosing(reason) {
