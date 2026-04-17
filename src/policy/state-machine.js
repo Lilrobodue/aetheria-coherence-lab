@@ -39,6 +39,9 @@ export class PolicyEngine {
     this._consecutivePivots = 0;
     // Calibrated 2026-04-17 after session analysis: allow at most one slope-veto extension per prescription.
     this._slopeVetoUsed = false;
+    // Calibrated 2026-04-17 after session analysis: adaptive ENTRAIN window — base 30s, 45s on extension or after the first pivot of the session.
+    this._inExtension = false;
+    this._hasPivotedEver = false;
     this._goalSustainStart = null;
     this._hugPeakTcs = 0;
     this._hugPeakLostSince = null;
@@ -257,6 +260,8 @@ export class PolicyEngine {
     this._entryVector = V ? { ...V } : null;
     // Fresh prescription: reset slope-veto budget (at most one veto per prescription).
     this._slopeVetoUsed = false;
+    // Fresh prescription: next ENTRAIN is a base window, not an extension.
+    this._inExtension = false;
 
     this._transition('ENTRAIN',
       `Playing ${freq?.frequency_hz || '?'} Hz, entering entrainment`);
@@ -265,7 +270,10 @@ export class PolicyEngine {
   _tickEntrain(V, F, duration) {
     if (!V) return;
 
-    const minDuration = this.config.entrain_min_duration_sec || 30;
+    // Calibrated 2026-04-17 after session analysis: extend to 45s on HOLD/veto extensions and on all base windows after the first pivot.
+    const baseMin = this.config.entrain_min_duration_sec || 30;
+    const extMin = this.config.entrain_extended_min_duration_sec ?? 45;
+    const minDuration = (this._inExtension || this._hasPivotedEver) ? extMin : baseMin;
     const maxDuration = this.config.entrain_max_duration_sec || 180;
 
     // Track TCS
@@ -329,11 +337,15 @@ export class PolicyEngine {
     // Track consecutive pivots
     if (result.decision === 'PIVOT') {
       this._consecutivePivots++;
+      // Calibrated 2026-04-17 after session analysis: once any pivot has occurred, all subsequent base ENTRAIN windows extend to 45s.
+      this._hasPivotedEver = true;
     } else {
       this._consecutivePivots = 0;
     }
 
     if (result.decision === 'HOLD') {
+      // Calibrated 2026-04-17 after session analysis: HOLD or slope-veto re-entry is an extension, not a fresh base window.
+      this._inExtension = true;
       // Re-enter ENTRAIN with same frequency
       this._transition('ENTRAIN', result.reason);
     } else {

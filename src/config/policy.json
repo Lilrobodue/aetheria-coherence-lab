@@ -1,6 +1,7 @@
 {
   "baseline_duration_sec": 90,
   "entrain_min_duration_sec": 30,
+  "entrain_extended_min_duration_sec": 45,
   "entrain_max_duration_sec": 180,
   "tracking_interval_sec": 1,
   "flip_margin": 0.15,
