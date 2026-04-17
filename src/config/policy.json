@@ -18,7 +18,7 @@
   "session_max_duration_sec": 1800,
   "goal_tcs_threshold": 80,
   "goal_sustain_duration_sec": 60,
-  "max_consecutive_pivots": 3,
+  "pivot_budget": 4,
   "hug_min_duration_sec": 45,
   "hug_peak_lost_grace_sec": 3,
   "no_repetition_window": 5,

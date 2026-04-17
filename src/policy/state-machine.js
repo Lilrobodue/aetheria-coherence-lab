@@ -388,7 +388,8 @@ export class PolicyEngine {
     const maxDuration = this.config.session_max_duration_sec || 1800;
     const goalTcs = this.config.goal_tcs_threshold || 80;
     const goalSustain = this.config.goal_sustain_duration_sec || 60;
-    const maxPivots = this.config.max_consecutive_pivots || 3;
+    // Calibrated 2026-04-17 after session analysis: raised budget 3 → 4; three sessions closed at the prior cap before frequencies had converged.
+    const maxPivots = this.config.pivot_budget ?? this.config.max_consecutive_pivots ?? 4;
 
     // Time cap
     if (this.sessionDuration >= maxDuration) {
