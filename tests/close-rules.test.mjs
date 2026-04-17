@@ -20,12 +20,10 @@ function makeBus() {
   return { publish() {}, subscribe() { return () => {}; } };
 }
 
-function runScenario({ peaks, baselineMean, baselineStd, sessionDurationSec }) {
+function runScenario({ peaks, baselineMean, baselineStd, sessionDurationSec, bcsSamples = null }) {
   const engine = new PolicyEngine(makeBus(), config, []);
   engine._baselineTcsMean = baselineMean;
   engine._baselineTcsStd = baselineStd;
-  // The sessionDuration getter = now - _sessionStart. Anchor _sessionStart
-  // in the past so the getter returns sessionDurationSec.
   engine._sessionStart = (performance.now() / 1000) - sessionDurationSec;
 
   for (const p of peaks) {
@@ -37,19 +35,22 @@ function runScenario({ peaks, baselineMean, baselineStd, sessionDurationSec }) {
     }
   }
 
-  // Swallow _enterClosing's bus publishes — we only want the return value
-  // of the check functions.
-  const closedWith = { sustained: false, stagnated: false, reason: null };
+  // Populate the BCS rolling buffer directly. Each sample supplies:
+  //   { t: session-relative seconds, bcs: number|null, bcsQuality: string|null }
+  // Tests that don't exercise the unified path should omit bcsSamples.
+  if (bcsSamples) engine._bcsSamples.push(...bcsSamples);
+
+  const closedWith = { reason: null };
   const origEnter = engine._enterClosing.bind(engine);
   engine._enterClosing = (reason) => { closedWith.reason = reason; };
 
-  const sustainedFired = engine._checkSustainedPeak();
-  if (sustainedFired) closedWith.sustained = true;
-  const stagnationFired = !sustainedFired && engine._checkStagnation();
-  if (stagnationFired) closedWith.stagnated = true;
+  // Evaluation order mirrors _tickEvaluate: unified → sustained → stagnation.
+  const unifiedFired = engine._checkUnifiedCoherence();
+  const sustainedFired = !unifiedFired && engine._checkSustainedPeak();
+  const stagnationFired = !unifiedFired && !sustainedFired && engine._checkStagnation();
 
   engine._enterClosing = origEnter;
-  return { sustainedFired, stagnationFired, reason: closedWith.reason };
+  return { unifiedFired, sustainedFired, stagnationFired, reason: closedWith.reason };
 }
 
 let failed = 0;
@@ -167,6 +168,115 @@ test('session_max at or below significance threshold → sustain does not fire',
   // Stagnation also shouldn't fire because peaks aren't declining below 80%
   // of max (68 * 0.8 = 54.4; all peaks > 54.4).
   assert.equal(r.stagnationFired, false, 'peaks not declining');
+});
+
+// ---------- CLOSE_ON_UNIFIED_COHERENCE ----------
+
+// Helper: fabricate BCS samples spanning `windowSec` ending at sessionT.
+// opts = { quality, bcs, count }. bcs can be a number or a function(i, count).
+function fabricateBcs(sessionT, windowSec, count, quality, bcsValue) {
+  const samples = [];
+  const step = windowSec / count;
+  for (let i = 0; i < count; i++) {
+    const t = sessionT - windowSec + (i + 1) * step;
+    const bcs = typeof bcsValue === 'function' ? bcsValue(i, count) : bcsValue;
+    samples.push({ t, bcs, bcsQuality: quality });
+  }
+  return samples;
+}
+
+test('high TCS + high BCS + all-full quality → UNIFIED_COHERENCE', () => {
+  // TCS: 6 peaks above significance with the last two tightly clustered.
+  // BCS: 15 full-quality samples, 14 of which ≥ 70 (> 85% ratio).
+  const peaks = [75, 72, 78, 76, 77, 76];
+  const sessionT = 400;
+  const bcsSamples = fabricateBcs(sessionT, 120, 15, 'full', 74);
+  const r = runScenario({
+    peaks, baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: sessionT,
+    bcsSamples
+  });
+  assert.equal(r.unifiedFired, true, 'unified should fire');
+  assert.equal(r.sustainedFired, false, 'sustained not reached (unified preempted)');
+  assert.match(r.reason, /unified coherence held/);
+});
+
+test('high TCS + high BCS but quality mostly partial → falls through to SUSTAINED_PEAK', () => {
+  // Only 3 of 15 samples are full-quality (min_valid is 12). Unified fails.
+  const peaks = [75, 72, 78, 76, 77, 76];
+  const sessionT = 400;
+  const partial = fabricateBcs(sessionT, 120, 12, 'partial', 74);
+  const full = fabricateBcs(sessionT, 120, 3, 'full', 75);
+  const r = runScenario({
+    peaks, baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: sessionT,
+    bcsSamples: [...partial, ...full]
+  });
+  assert.equal(r.unifiedFired, false, 'unified should fail on insufficient valid samples');
+  assert.equal(r.sustainedFired, true, 'sustained-peak catches the TCS success');
+});
+
+test('high TCS + low BCS (full quality, below threshold) → falls through to SUSTAINED_PEAK', () => {
+  // 15 full samples, all ≈ 55 (well below 70 threshold). Unified fails on
+  // sustain ratio (0/15 above). Sustained-peak still fires on TCS alone.
+  const peaks = [75, 72, 78, 76, 77, 76];
+  const sessionT = 400;
+  const bcsSamples = fabricateBcs(sessionT, 120, 15, 'full', 55);
+  const r = runScenario({
+    peaks, baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: sessionT,
+    bcsSamples
+  });
+  assert.equal(r.unifiedFired, false);
+  assert.equal(r.sustainedFired, true);
+});
+
+test('high TCS + BCS numeric zeros with quality ok (Path C) → falls through to SUSTAINED_PEAK', () => {
+  // 15 full samples with bcs=0 (legit "no shared modes"). Unified fails
+  // the sustain gate (0/15 above threshold) but count-as-valid is correct.
+  const peaks = [75, 72, 78, 76, 77, 76];
+  const sessionT = 400;
+  const bcsSamples = fabricateBcs(sessionT, 120, 15, 'full', 0);
+  const r = runScenario({
+    peaks, baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: sessionT,
+    bcsSamples
+  });
+  assert.equal(r.unifiedFired, false, 'unified blocked by zero bcs');
+  assert.equal(r.sustainedFired, true, 'sustained-peak still fires on TCS');
+});
+
+test('low TCS + high BCS → neither unified nor sustained-peak fires', () => {
+  // TCS peaks never clear significance (significance ≈ 71). BCS all good.
+  // Unified and sustained-peak both gated by TCS. Stagnation: rxPlayed=6,
+  // rxSincePeak = 6 - 1 = 5 ≥ 3, but trailing-max mean = 57.67 is above
+  // the 0.80 × 60 = 48 floor, so stagnation also doesn't fire.
+  const peaks = [60, 57, 58, 55, 59, 58];
+  const sessionT = 400;
+  const bcsSamples = fabricateBcs(sessionT, 120, 15, 'full', 75);
+  const r = runScenario({
+    peaks, baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: sessionT,
+    bcsSamples
+  });
+  assert.equal(r.unifiedFired, false);
+  assert.equal(r.sustainedFired, false);
+  // Stagnation may or may not fire depending on decline — either way unified
+  // is the negative assertion we care about here.
+});
+
+test('session < unified_min_duration_sec → unified blocked, sustained also blocked', () => {
+  // 200s is under both the 360 unified_min and 360 success_min gates.
+  const peaks = [75, 72, 78, 76, 77, 76];
+  const sessionT = 200;
+  const bcsSamples = fabricateBcs(sessionT, 120, 15, 'full', 74);
+  const r = runScenario({
+    peaks, baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: sessionT,
+    bcsSamples
+  });
+  assert.equal(r.unifiedFired, false);
+  assert.equal(r.sustainedFired, false);
 });
 
 console.log();

@@ -187,6 +187,11 @@ function runSimulation(baseProfile, label, opts = {}) {
   const stagnationMinRx = config.stagnation_min_prescriptions ?? 6;
   const stagnationWindows = config.stagnation_windows ?? 3;
   const stagnationDeclineRatio = config.stagnation_decline_ratio ?? 0.80;
+  const unifiedMinDur = config.unified_min_duration_sec ?? 360;
+  const unifiedBcsWindow = config.unified_bcs_window_sec ?? 120;
+  const unifiedBcsMinValid = config.unified_bcs_min_valid_samples ?? 12;
+  const unifiedBcsSustainRatio = config.unified_bcs_sustain_ratio ?? 0.85;
+  const bcsSignificanceThreshold = config.bcs_significance_threshold ?? 70;
 
   const metrics = {
     label,
@@ -324,12 +329,50 @@ function runSimulation(baseProfile, label, opts = {}) {
         break;
       }
 
-      // New-logic closing: on prescription end, check sustained-peak then stagnation
+      // New-logic closing: on prescription end, check unified → sustained-peak → stagnation
       if (!usePrePatchLogic && (result.decision === 'PIVOT' || result.decision === 'ADVANCE')) {
         prescriptionPeaks.push(tcsMaxInState);
         if (tcsMaxInState > sessionMaxTcs) {
           sessionMaxTcs = tcsMaxInState;
           prescriptionOfSessionMax = metrics.prescriptionsPlayed;
+        }
+
+        // CLOSE_ON_UNIFIED_COHERENCE — priority 1.
+        // Profile may supply a synthetic bcsProfile(t) → { bcs, bcsQuality }.
+        // Profiles without one produce no BCS samples → unified cannot fire →
+        // regression guard: A/B/C fall through to the same rules as before.
+        if (sessionT >= unifiedMinDur && profile.bcsProfile) {
+          const fromT = Math.max(0, sessionT - unifiedBcsWindow);
+          const bcsInWindow = [];
+          for (let ti = Math.ceil(fromT / 10) * 10; ti <= sessionT; ti += 10) {
+            const s = profile.bcsProfile(ti);
+            if (s) bcsInWindow.push(s);
+          }
+          const validBcs = bcsInWindow.filter(s =>
+            s.bcsQuality === 'full' && s.bcs != null && isFinite(s.bcs)
+          );
+          const aboveBcs = validBcs.filter(s => s.bcs >= bcsSignificanceThreshold);
+
+          const trailing = prescriptionPeaks.slice(-trailingMaxWindows);
+          const tMax = trailing.length >= trailingMaxWindows
+            ? Math.max(...trailing) : sessionMaxTcs;
+          const recentTcs = prescriptionPeaks.slice(-sustainWindows);
+          const tcsFloor = sustainRatio * tMax;
+          const tcsPortionOK =
+            sessionMaxTcs > significantPeakValue &&
+            tMax > significantPeakValue &&
+            recentTcs.length >= sustainWindows &&
+            recentTcs.every(p => p >= tcsFloor);
+          const bcsPortionOK =
+            validBcs.length >= unifiedBcsMinValid &&
+            aboveBcs.length / validBcs.length >= unifiedBcsSustainRatio;
+
+          if (tcsPortionOK && bcsPortionOK) {
+            const bcsMean = validBcs.reduce((a, b) => a + b.bcs, 0) / validBcs.length;
+            closeWith('UNIFIED_COHERENCE',
+              `unified coherence held — TCS sustained=${recentTcs.length}/${sustainWindows}, BCS valid=${validBcs.length}, BCS above-threshold=${aboveBcs.length}/${validBcs.length} (session_max_tcs=${sessionMaxTcs.toFixed(1)}, bcs_mean=${bcsMean.toFixed(1)})`);
+            break;
+          }
         }
 
         // Diagnostic: record the SUSTAINED_PEAK evaluation regardless of outcome.
@@ -514,6 +557,22 @@ const profiles = [
     seed: 3003,
     baselineMean: 55, baselineStd: 9, baselineMin: 30, baselineMax: 69,
     specialGutRiseDip: true
+  },
+  // Profile D fabricates BCS in the full-quality [72, 80] band so the
+  // unified rule becomes reachable. Without this the simulator has no
+  // BCS stream and unified can never fire (regression guard for A/B/C).
+  {
+    name: 'PROFILE D — unified high (TCS + BCS sustained together)',
+    seed: 4004,
+    baselineMean: 58, baselineStd: 7, baselineMin: 40, baselineMax: 72,
+    bcsProfile: (t) => {
+      // Session start: BCS not yet stable → partial. After ~120s: full,
+      // in the 72-80 range with a seeded sinusoidal ripple.
+      if (t < 120) return { bcs: null, bcsQuality: 'partial' };
+      const phase = Math.sin(t * 0.05);
+      const bcs = 76 + 3 * phase; // swings 73..79
+      return { bcs, bcsQuality: 'full' };
+    }
   }
 ];
 
@@ -523,6 +582,7 @@ console.log('='.repeat(72));
 console.log(`ENTRAIN window (base/ext): ${config.entrain_min_duration_sec}s / ${config.entrain_extended_min_duration_sec}s`);
 console.log(`peak significance K: ${config.peak_significance_k}  (threshold = μ + K·σ)`);
 console.log(`slope-veto threshold: +${config.slope_veto_threshold} TCS across window (mean last 5 − mean first 5)`);
+console.log(`CLOSE_ON_UNIFIED_COHERENCE: t≥${config.unified_min_duration_sec}s, TCS sustain-peak gates + ≥${config.unified_bcs_min_valid_samples} full BCS samples in last ${config.unified_bcs_window_sec}s with ≥${Math.round(config.unified_bcs_sustain_ratio * 100)}% ≥ BCS ${config.bcs_significance_threshold}`);
 console.log(`CLOSE_ON_SUSTAINED_PEAK: t≥${config.success_min_duration_sec}s, last ${config.sustain_windows} peaks ≥ ${Math.round(config.sustain_ratio * 100)}% of trailing_max (max of last ${config.trailing_max_windows} peaks)`);
 console.log(`CLOSE_ON_STAGNATION: t≥${config.success_min_duration_sec}s, ≥${config.stagnation_min_prescriptions} Rx, no session_max update in ${config.stagnation_windows} windows, mean recent peaks < ${Math.round(config.stagnation_decline_ratio * 100)}% of session_max`);
 console.log(`time cap (new/old): ${config.session_max_duration_sec}s / 1800s (safety net)`);
