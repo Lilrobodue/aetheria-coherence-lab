@@ -183,6 +183,7 @@ function runSimulation(baseProfile, label, opts = {}) {
   const successMinDur = config.success_min_duration_sec ?? 360;
   const sustainRatio = config.sustain_ratio ?? 0.85;
   const sustainWindows = config.sustain_windows ?? 2;
+  const trailingMaxWindows = config.trailing_max_windows ?? 3;
   const stagnationMinRx = config.stagnation_min_prescriptions ?? 6;
   const stagnationWindows = config.stagnation_windows ?? 3;
   const stagnationDeclineRatio = config.stagnation_decline_ratio ?? 0.80;
@@ -332,8 +333,14 @@ function runSimulation(baseProfile, label, opts = {}) {
         }
 
         // Diagnostic: record the SUSTAINED_PEAK evaluation regardless of outcome.
+        // Commit 10: sustain floor uses trailing_max (last N prescriptions) rather
+        // than all-time session_max_tcs. Significance gate still uses session_max.
         const recent = prescriptionPeaks.slice(-sustainWindows);
-        const floor = sustainRatio * sessionMaxTcs;
+        const trailing = prescriptionPeaks.slice(-trailingMaxWindows);
+        const trailingMax = trailing.length >= trailingMaxWindows
+          ? Math.max(...trailing)
+          : sessionMaxTcs;
+        const floor = sustainRatio * trailingMax;
         let sustainPassed = false;
         let gatedBy = null;
         if (sessionT < successMinDur) gatedBy = 'min-duration';
@@ -346,17 +353,18 @@ function runSimulation(baseProfile, label, opts = {}) {
           t: sessionT,
           rx: metrics.prescriptionsPlayed,
           sessionMax: sessionMaxTcs,
+          trailingMax,
           floor,
           recentPeaks: recent.slice(),
           passed: sustainPassed,
           gatedBy
         });
 
-        // CLOSE_ON_SUSTAINED_PEAK (9b: sustain_ratio 0.85)
+        // CLOSE_ON_SUSTAINED_PEAK
         if (sustainPassed) {
           const recentStr = recent.map(p => p.toFixed(1)).join(', ');
           closeWith('SUSTAINED_PEAK',
-            `coherence held — closing on peak (session_max=${sessionMaxTcs.toFixed(1)}, recent_peaks=[${recentStr}])`);
+            `coherence held — closing on peak (session_max=${sessionMaxTcs.toFixed(1)}, trailing_max=${trailingMax.toFixed(1)}, recent_peaks=[${recentStr}])`);
           break;
         }
 
@@ -472,7 +480,7 @@ function printSustainChecks(m) {
     const peaks = c.recentPeaks.map(p => p.toFixed(1)).join(', ');
     const floor = c.floor.toFixed(1);
     const mark = c.passed ? '✓' : '✗';
-    console.log(`      Rx#${c.rx} t=${c.t}s  sessionMax=${c.sessionMax.toFixed(1)}  floor=${floor}  recentPeaks=[${peaks}]  ${mark} ${c.gatedBy}`);
+    console.log(`      Rx#${c.rx} t=${c.t}s  sessionMax=${c.sessionMax.toFixed(1)}  trailingMax=${c.trailingMax.toFixed(1)}  floor=${floor}  recentPeaks=[${peaks}]  ${mark} ${c.gatedBy}`);
   }
 }
 
@@ -514,7 +522,7 @@ console.log('='.repeat(72));
 console.log(`ENTRAIN window (base/ext): ${config.entrain_min_duration_sec}s / ${config.entrain_extended_min_duration_sec}s`);
 console.log(`peak significance K: ${config.peak_significance_k}  (threshold = μ + K·σ)`);
 console.log(`slope-veto threshold: +${config.slope_veto_threshold} TCS across window (mean last 5 − mean first 5)`);
-console.log(`CLOSE_ON_SUSTAINED_PEAK: t≥${config.success_min_duration_sec}s, last ${config.sustain_windows} peaks ≥ ${Math.round(config.sustain_ratio * 100)}% of session_max`);
+console.log(`CLOSE_ON_SUSTAINED_PEAK: t≥${config.success_min_duration_sec}s, last ${config.sustain_windows} peaks ≥ ${Math.round(config.sustain_ratio * 100)}% of trailing_max (max of last ${config.trailing_max_windows} peaks)`);
 console.log(`CLOSE_ON_STAGNATION: t≥${config.success_min_duration_sec}s, ≥${config.stagnation_min_prescriptions} Rx, no session_max update in ${config.stagnation_windows} windows, mean recent peaks < ${Math.round(config.stagnation_decline_ratio * 100)}% of session_max`);
 console.log(`time cap (new/old): ${config.session_max_duration_sec}s / 1800s (safety net)`);
 console.log();
