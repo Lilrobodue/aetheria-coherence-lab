@@ -65,7 +65,8 @@
     .btn:disabled { opacity: 0.3; cursor: not-allowed; }
     .btn.btn-connect { border-color: var(--success); color: var(--success); }
     .btn.btn-connect.connected { background: rgba(0,230,118,0.15); }
-    .btn.btn-start { border-color: var(--accent); color: var(--accent); }
+    .btn.btn-start { border-color: var(--warning); color: var(--warning); }
+    .btn.btn-start:hover:not(:disabled) { background: rgba(255,193,7,0.15); }
 
     /* Info bar: status + data flow + session in one row */
     .info-bar {
