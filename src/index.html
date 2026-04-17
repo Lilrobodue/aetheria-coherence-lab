@@ -34,7 +34,14 @@
       font-family: 'Consolas', 'SF Mono', 'Fira Code', monospace;
       background: var(--bg-primary);
       color: var(--text-primary);
+      /* 100vh on mobile Chrome is the *large* viewport — it can extend behind
+         system chrome (URL bar and nav bar area), causing content at the
+         scroll bottom to render below the visible area. 100dvh is the
+         *dynamic* viewport (fallback to 100vh for older browsers) and
+         resizes as chrome comes and goes, so the scroll container always
+         fits within the actually-visible pixels. */
       height: 100vh;
+      height: 100dvh;
       overflow: hidden;
     }
 
@@ -42,6 +49,7 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      height: 100dvh;
     }
 
     /* Header */
@@ -300,13 +308,14 @@
         background: var(--bg-primary);
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        /* Respect the Android/iOS bottom inset (gesture-nav home indicator
-           or 3-button nav bar) so the last scrollable item — Hide Signals
-           label and the fNIRS plot at the end of the signals stack — is
-           never flush against system chrome. 16px baseline + env() inset
-           so phones without an inset still get a visible buffer. */
-        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-        scroll-padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        /* Respect the Android/iOS bottom inset so the last scrollable items
+           (Hide Signals label and fNIRS plot) never land behind system
+           chrome. 56px baseline chosen to clear a full Android 3-button
+           nav bar (~48px) even when env(safe-area-inset-bottom) reports 0
+           — some Chrome configurations don't populate it reliably on
+           non-installed PWAs. env() stacks on top for phones that do. */
+        padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+        scroll-padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
       }
 
       /* --- Header: wrap controls below title --- */
