@@ -181,10 +181,11 @@ function runSimulation(baseProfile, label, opts = {}) {
   const declineThreshold = config.decline_from_peak_threshold ?? 10;
 
   const successMinDur = config.success_min_duration_sec ?? 360;
-  const sustainRatio = config.sustain_ratio ?? 0.90;
+  const sustainRatio = config.sustain_ratio ?? 0.85;
   const sustainWindows = config.sustain_windows ?? 2;
   const stagnationMinRx = config.stagnation_min_prescriptions ?? 6;
   const stagnationWindows = config.stagnation_windows ?? 3;
+  const stagnationDeclineRatio = config.stagnation_decline_ratio ?? 0.80;
 
   const metrics = {
     label,
@@ -201,7 +202,10 @@ function runSimulation(baseProfile, label, opts = {}) {
     sessionMaxTcs: 0,
     closingRule: null,    // 'SUSTAINED_PEAK' | 'STAGNATION' | 'TIME_CAP' | 'PIVOT_BUDGET'
     closingReason: null,
-    timeline: []
+    timeline: [],
+    // Per prescription-end diagnostic of the CLOSE_ON_SUSTAINED_PEAK check:
+    // { t, sessionMax, floor, recentPeaks, passed, gatedBy }
+    sustainChecks: []
   };
 
   let sessionT = config.baseline_duration_sec ?? 90;
@@ -327,24 +331,51 @@ function runSimulation(baseProfile, label, opts = {}) {
           prescriptionOfSessionMax = metrics.prescriptionsPlayed;
         }
 
-        // CLOSE_ON_SUSTAINED_PEAK
-        if (
-          sessionT >= successMinDur &&
-          sessionMaxTcs > significantPeakValue &&
-          prescriptionPeaks.length >= sustainWindows &&
-          prescriptionPeaks.slice(-sustainWindows).every(p => p >= sustainRatio * sessionMaxTcs)
-        ) {
-          const recent = prescriptionPeaks.slice(-sustainWindows).map(p => p.toFixed(1)).join(', ');
+        // Diagnostic: record the SUSTAINED_PEAK evaluation regardless of outcome.
+        const recent = prescriptionPeaks.slice(-sustainWindows);
+        const floor = sustainRatio * sessionMaxTcs;
+        let sustainPassed = false;
+        let gatedBy = null;
+        if (sessionT < successMinDur) gatedBy = 'min-duration';
+        else if (sessionMaxTcs <= significantPeakValue) gatedBy = 'peak-below-threshold';
+        else if (recent.length < sustainWindows) gatedBy = 'not-enough-peaks';
+        else if (!recent.every(p => p >= floor)) gatedBy = 'peak-below-floor';
+        else { sustainPassed = true; gatedBy = 'passed'; }
+
+        metrics.sustainChecks.push({
+          t: sessionT,
+          rx: metrics.prescriptionsPlayed,
+          sessionMax: sessionMaxTcs,
+          floor,
+          recentPeaks: recent.slice(),
+          passed: sustainPassed,
+          gatedBy
+        });
+
+        // CLOSE_ON_SUSTAINED_PEAK (9b: sustain_ratio 0.85)
+        if (sustainPassed) {
+          const recentStr = recent.map(p => p.toFixed(1)).join(', ');
           closeWith('SUSTAINED_PEAK',
-            `coherence held — closing on peak (session_max=${sessionMaxTcs.toFixed(1)}, recent_peaks=[${recent}])`);
+            `coherence held — closing on peak (session_max=${sessionMaxTcs.toFixed(1)}, recent_peaks=[${recentStr}])`);
           break;
         }
 
-        // CLOSE_ON_STAGNATION
+        // CLOSE_ON_STAGNATION (9a: require declining peaks; 9c: duration gate)
         const rxSincePeak = metrics.prescriptionsPlayed - prescriptionOfSessionMax;
-        if (metrics.prescriptionsPlayed >= stagnationMinRx && rxSincePeak >= stagnationWindows) {
-          closeWith('STAGNATION', `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak})`);
-          break;
+        if (
+          sessionT >= successMinDur &&
+          metrics.prescriptionsPlayed >= stagnationMinRx &&
+          rxSincePeak >= stagnationWindows &&
+          recent.length >= stagnationWindows
+        ) {
+          const stagRecent = prescriptionPeaks.slice(-stagnationWindows);
+          const meanRecent = stagRecent.reduce((a, b) => a + b, 0) / stagRecent.length;
+          const stagFloor = stagnationDeclineRatio * sessionMaxTcs;
+          if (meanRecent < stagFloor) {
+            closeWith('STAGNATION',
+              `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak}, mean_recent_peaks=${meanRecent.toFixed(1)} < floor=${stagFloor.toFixed(1)} [${Math.round(stagnationDeclineRatio * 100)}% of session_max ${sessionMaxTcs.toFixed(1)}])`);
+            break;
+          }
         }
       }
 
@@ -382,9 +413,19 @@ function runSimulation(baseProfile, label, opts = {}) {
               prescriptionOfSessionMax = metrics.prescriptionsPlayed;
             }
             const rxSincePeak = metrics.prescriptionsPlayed - prescriptionOfSessionMax;
-            if (metrics.prescriptionsPlayed >= stagnationMinRx && rxSincePeak >= stagnationWindows) {
-              closeWith('STAGNATION', `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak})`);
-              break;
+            if (
+              sessionT >= successMinDur &&
+              metrics.prescriptionsPlayed >= stagnationMinRx &&
+              rxSincePeak >= stagnationWindows
+            ) {
+              const stagRecent = prescriptionPeaks.slice(-stagnationWindows);
+              const meanRecent = stagRecent.reduce((a, b) => a + b, 0) / stagRecent.length;
+              const stagFloor = stagnationDeclineRatio * sessionMaxTcs;
+              if (meanRecent < stagFloor) {
+                closeWith('STAGNATION',
+                  `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak}, mean_recent_peaks=${meanRecent.toFixed(1)} < floor=${stagFloor.toFixed(1)})`);
+                break;
+              }
             }
           }
           lastHint = 'PIVOT';
@@ -422,6 +463,17 @@ function printSummary(m) {
   console.log(`    advances / holds    : ${m.advanceCount} / ${m.holdCount}`);
   console.log(`    closing rule        : ${m.closingRule}`);
   console.log(`    closing reason      : ${m.closingReason}`);
+}
+
+function printSustainChecks(m) {
+  if (!m.sustainChecks || m.sustainChecks.length === 0) return;
+  console.log('    SUSTAINED_PEAK check per prescription end:');
+  for (const c of m.sustainChecks) {
+    const peaks = c.recentPeaks.map(p => p.toFixed(1)).join(', ');
+    const floor = c.floor.toFixed(1);
+    const mark = c.passed ? '✓' : '✗';
+    console.log(`      Rx#${c.rx} t=${c.t}s  sessionMax=${c.sessionMax.toFixed(1)}  floor=${floor}  recentPeaks=[${peaks}]  ${mark} ${c.gatedBy}`);
+  }
 }
 
 function printTimeline(m, maxRows = 12) {
@@ -463,7 +515,7 @@ console.log(`ENTRAIN window (base/ext): ${config.entrain_min_duration_sec}s / ${
 console.log(`peak significance K: ${config.peak_significance_k}  (threshold = μ + K·σ)`);
 console.log(`slope-veto threshold: +${config.slope_veto_threshold} TCS across window (mean last 5 − mean first 5)`);
 console.log(`CLOSE_ON_SUSTAINED_PEAK: t≥${config.success_min_duration_sec}s, last ${config.sustain_windows} peaks ≥ ${Math.round(config.sustain_ratio * 100)}% of session_max`);
-console.log(`CLOSE_ON_STAGNATION: ≥${config.stagnation_min_prescriptions} Rx, no session_max update in ${config.stagnation_windows} windows`);
+console.log(`CLOSE_ON_STAGNATION: t≥${config.success_min_duration_sec}s, ≥${config.stagnation_min_prescriptions} Rx, no session_max update in ${config.stagnation_windows} windows, mean recent peaks < ${Math.round(config.stagnation_decline_ratio * 100)}% of session_max`);
 console.log(`time cap (new/old): ${config.session_max_duration_sec}s / 1800s (safety net)`);
 console.log();
 
@@ -477,5 +529,7 @@ for (const p of profiles) {
   printSummary(after);
   console.log();
   printTimeline(after);
+  console.log();
+  printSustainChecks(after);
   console.log();
 }
