@@ -30,6 +30,17 @@ export class PolicyEngine {
     this._baselineTcsSamples = [];
     this._baselineTcsMean = null;
     this._baselineTcsStd = null;
+    // Baseline character scalars (surfaced on state snapshot; available for
+    // future prescription-engine classification after N≥10 sessions).
+    this._baselineTcsMax = null;
+    this._baselineTcsRange = null;
+    this._baselineTcsPeakRate = null;
+    // Sustaining mode: set true when baseline BCS is already unified (mean and
+    // sustain-ratio both clear the BCS threshold). When true, the duration
+    // floors on SUSTAINED_PEAK and UNIFIED_COHERENCE are bypassed so the
+    // session can close on the first sustained peak.
+    this._baselineBcsUnified = null;
+    this._baselineBcsMean = null;
     this._currentFrequency = null;
     this._frequencyHistory = [];
     this._tcsHistory = [];
@@ -44,8 +55,6 @@ export class PolicyEngine {
     // Calibrated 2026-04-17 after session analysis: track session-max TCS and per-prescription peaks for CLOSE_ON_SUSTAINED_PEAK.
     this._sessionMaxTcs = 0;
     this._prescriptionPeaks = [];
-    // Calibrated 2026-04-17 after session analysis: prescription index (1-based) that most recently updated _sessionMaxTcs; drives CLOSE_ON_STAGNATION.
-    this._prescriptionOfSessionMax = 0;
     // Rolling buffer of recent BCS samples for CLOSE_ON_UNIFIED_COHERENCE.
     // Stored as { t (session-relative), bcs (number|null), bcsQuality }.
     // Trimmed to ~30 samples (~5 min at 0.1 Hz) to cover any reasonable
@@ -228,7 +237,30 @@ export class PolicyEngine {
       const stdFloor = this.config.baseline_tcs_std_floor ?? 3.0;
       this._baselineTcsMean = mean(this._baselineTcsSamples);
       this._baselineTcsStd = Math.max(std(this._baselineTcsSamples), stdFloor);
-      console.log(`Policy: baseline TCS μ=${this._baselineTcsMean.toFixed(1)} σ=${this._baselineTcsStd.toFixed(1)} (n=${this._baselineTcsSamples.length})`);
+      this._baselineTcsMax = Math.max(...this._baselineTcsSamples);
+      this._baselineTcsRange = this._baselineTcsMax - Math.min(...this._baselineTcsSamples);
+      this._baselineTcsPeakRate = this._computeBaselinePeakRate(this._baselineTcsSamples);
+      console.log(`Policy: baseline TCS μ=${this._baselineTcsMean.toFixed(1)} σ=${this._baselineTcsStd.toFixed(1)} max=${this._baselineTcsMax.toFixed(1)} range=${this._baselineTcsRange.toFixed(1)} peak_rate=${this._baselineTcsPeakRate.toFixed(1)}/min (n=${this._baselineTcsSamples.length})`);
+    }
+
+    // Sustaining-mode detection: is baseline BCS already unified? Uses the
+    // same full-quality filter as CLOSE_ON_UNIFIED_COHERENCE so the two rules
+    // agree on what "unified" means.
+    const baselineDurationSec = this.config.baseline_duration_sec ?? 90;
+    const bcsThreshold = this.config.bcs_significance_threshold ?? 64;
+    const unifiedSustainRatio = this.config.baseline_bcs_unified_sustain_ratio ?? 0.70;
+    const baselineBcs = this._bcsSamples.filter(s =>
+      s.t < baselineDurationSec && s.bcsQuality === 'full' && s.bcs != null && isFinite(s.bcs)
+    );
+    if (baselineBcs.length >= 3) {
+      const bcsMean = baselineBcs.reduce((a, b) => a + b.bcs, 0) / baselineBcs.length;
+      const aboveCount = baselineBcs.filter(s => s.bcs >= bcsThreshold).length;
+      const ratio = aboveCount / baselineBcs.length;
+      this._baselineBcsMean = bcsMean;
+      this._baselineBcsUnified = (bcsMean >= bcsThreshold) && (ratio >= unifiedSustainRatio);
+      if (this._baselineBcsUnified) {
+        console.log(`Policy: baseline already unified (BCS μ=${bcsMean.toFixed(1)}, ${Math.round(ratio * 100)}% ≥${bcsThreshold}) — sustaining mode active, success floor removed`);
+      }
     }
 
     // Set arousal anchor and initialise cascade cursor
@@ -342,6 +374,11 @@ export class PolicyEngine {
       entryVector: this._entryVector,
       baselineTcsMean: this._baselineTcsMean,
       baselineTcsStd: this._baselineTcsStd,
+      baselineTcsMax: this._baselineTcsMax,
+      baselineTcsRange: this._baselineTcsRange,
+      baselineTcsPeakRate: this._baselineTcsPeakRate,
+      baselineBcsMean: this._baselineBcsMean,
+      baselineBcsUnified: this._baselineBcsUnified,
       slopeVetoAvailable: !this._slopeVetoUsed
     }, this.config);
 
@@ -363,7 +400,6 @@ export class PolicyEngine {
       this._prescriptionPeaks.push(this._tcsMaxInState);
       if (this._tcsMaxInState > this._sessionMaxTcs) {
         this._sessionMaxTcs = this._tcsMaxInState;
-        this._prescriptionOfSessionMax = this._frequencyHistory.length;
       }
       if (this._checkUnifiedCoherence()) return;
       if (this._checkSustainedPeak()) return;
@@ -426,7 +462,7 @@ export class PolicyEngine {
   //   - { quality: 'unavailable' }→ skip, don't count, don't fail
   _checkUnifiedCoherence() {
     const minDur = this.config.unified_min_duration_sec ?? 360;
-    if (this.sessionDuration < minDur) return false;
+    if (this.sessionDuration < minDur && !this._baselineBcsUnified) return false;
 
     // TCS portion (identical to SUSTAINED_PEAK gate stack)
     const peakK = this.config.peak_significance_k ?? 1.5;
@@ -487,7 +523,7 @@ export class PolicyEngine {
     const ratio = this.config.sustain_ratio ?? 0.85;
     const windows = this.config.sustain_windows ?? 2;
     const trailingWindows = this.config.trailing_max_windows ?? 3;
-    if (this.sessionDuration < minDur) return false;
+    if (this.sessionDuration < minDur && !this._baselineBcsUnified) return false;
     if (this._prescriptionPeaks.length < windows) return false;
 
     const peakK = this.config.peak_significance_k ?? 1.5;
@@ -548,27 +584,46 @@ export class PolicyEngine {
     return false;
   }
 
-  // Calibrated 2026-04-17 after session analysis: CLOSE_ON_STAGNATION — session_max hasn't moved in N prescriptions, enough have been tried, AND recent peaks are actually declining (not just holding near session_max). Gated behind the same 6-min floor as CLOSE_ON_SUSTAINED_PEAK so success has first crack.
-  _checkStagnation() {
-    const minRx = this.config.stagnation_min_prescriptions ?? 6;
-    const windows = this.config.stagnation_windows ?? 3;
-    const declineRatio = this.config.stagnation_decline_ratio ?? 0.80;
-    const minDur = this.config.success_min_duration_sec ?? 360;
+  // Count local maxima in the baseline TCS series with prominence ≥ 0.5σ on at
+  // least one side (filters sensor jitter). Returns peaks per minute.
+  _computeBaselinePeakRate(samples) {
+    if (samples.length < 3) return 0;
+    const sigma = std(samples);
+    const threshold = 0.5 * sigma;
+    let peaks = 0;
+    for (let i = 1; i < samples.length - 1; i++) {
+      if (samples[i] > samples[i - 1] && samples[i] > samples[i + 1] &&
+          (samples[i] - samples[i - 1] >= threshold || samples[i] - samples[i + 1] >= threshold)) {
+        peaks++;
+      }
+    }
+    const durationMin = (this.config.baseline_duration_sec ?? 90) / 60;
+    return durationMin > 0 ? peaks / durationMin : 0;
+  }
 
-    if (this.sessionDuration < minDur) return false;
-    const rxPlayed = this._frequencyHistory.length;
-    if (rxPlayed < minRx) return false;
-    const rxSincePeak = rxPlayed - this._prescriptionOfSessionMax;
-    if (rxSincePeak < windows) return false;
+  // Calibrated 2026-04-18 after 3-session analysis: CLOSE_ON_STAGNATION detects
+  // destabilization — the trailing prescription peaks sit below
+  // baseline_mean − k·baseline_std, meaning the user's post-baseline state is
+  // meaningfully worse than their resting state. Replaces the earlier
+  // "fell from session_max" rule, which relied on an entrainment peak that
+  // often never materialized when entrainment TCS ran below baseline TCS.
+  _checkStagnation() {
+    const k = this.config.destabilization_k_std ?? 1.0;
+    const minRx = this.config.destabilization_min_prescriptions ?? 2;
+    const windows = this.config.destabilization_windows ?? 2;
+
+    if (this._baselineTcsMean == null || this._baselineTcsStd == null) return false;
+    if (this._frequencyHistory.length < minRx) return false;
 
     const recent = this._prescriptionPeaks.slice(-windows);
     if (recent.length < windows) return false;
+
+    const floor = this._baselineTcsMean - k * this._baselineTcsStd;
     const meanRecent = recent.reduce((a, b) => a + b, 0) / recent.length;
-    const floor = declineRatio * this._sessionMaxTcs;
     if (meanRecent >= floor) return false;
 
     this._enterClosing(
-      `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak}, mean_recent_peaks=${meanRecent.toFixed(1)} < floor=${floor.toFixed(1)} [${Math.round(declineRatio * 100)}% of session_max ${this._sessionMaxTcs.toFixed(1)}])`
+      `destabilized — trailing peaks mean=${meanRecent.toFixed(1)} < baseline floor=${floor.toFixed(1)} (μ=${this._baselineTcsMean.toFixed(1)} σ=${this._baselineTcsStd.toFixed(1)}, k=${k})`
     );
     return true;
   }

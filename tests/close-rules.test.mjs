@@ -1,7 +1,7 @@
 // Unit tests for CLOSE_ON_SUSTAINED_PEAK and CLOSE_ON_STAGNATION.
 // Exercises the real PolicyEngine methods by directly populating the state
-// they consume (_prescriptionPeaks, _sessionMaxTcs, _prescriptionOfSessionMax,
-// baseline stats, _sessionStart). Uses a minimal bus stub — no timers fire.
+// they consume (_prescriptionPeaks, _sessionMaxTcs, baseline stats,
+// _sessionStart). Uses a minimal bus stub — no timers fire.
 //
 // Run: node tests/close-rules.test.mjs
 // Exits non-zero on assertion failure.
@@ -20,19 +20,17 @@ function makeBus() {
   return { publish() {}, subscribe() { return () => {}; } };
 }
 
-function runScenario({ peaks, baselineMean, baselineStd, sessionDurationSec, bcsSamples = null }) {
+function runScenario({ peaks, baselineMean, baselineStd, sessionDurationSec, bcsSamples = null, baselineBcsUnified = null }) {
   const engine = new PolicyEngine(makeBus(), config, []);
   engine._baselineTcsMean = baselineMean;
   engine._baselineTcsStd = baselineStd;
+  engine._baselineBcsUnified = baselineBcsUnified;
   engine._sessionStart = (performance.now() / 1000) - sessionDurationSec;
 
   for (const p of peaks) {
     engine._frequencyHistory.push({ frequency_hz: 100, regime: 'GUT' });
     engine._prescriptionPeaks.push(p);
-    if (p > engine._sessionMaxTcs) {
-      engine._sessionMaxTcs = p;
-      engine._prescriptionOfSessionMax = engine._frequencyHistory.length;
-    }
+    if (p > engine._sessionMaxTcs) engine._sessionMaxTcs = p;
   }
 
   // Populate the BCS rolling buffer directly. Each sample supplies:
@@ -103,34 +101,53 @@ test('fallback: < trailing_max_windows peaks → uses all-time session_max', () 
   assert.equal(r.sustainedFired, true, 'fallback to session_max, 78 ≥ 73.1');
 });
 
-test('strictly declining peaks → STAGNATION (trailing_max below significance)', () => {
-  // Peaks [86, 82, 77, 60, 50, 40]: strictly decreasing. Baseline μ=62, σ=6
-  // → significance=71. Trailing_max of last 3 = 60 which is below 71, so
-  // the Commit 11 gate blocks SUSTAIN. STAGNATION: mean(60, 50, 40) = 50
-  // < 0.80 * 86 = 68.8 → fires.
+test('trailing peaks destabilized below baseline floor → STAGNATION', () => {
+  // Peaks decay until the trailing window sits clearly below baseline floor.
+  // Baseline μ=62, σ=6 → floor at k=1.0 = 56. Mean of last 2 = (50+40)/2 = 45
+  // < 56 → destabilization fires. SUSTAINED_PEAK blocked because trailing_max
+  // 50 < significance 71.
   const r = runScenario({
     peaks: [86, 82, 77, 60, 50, 40],
     baselineMean: 62, baselineStd: 6,
     sessionDurationSec: 500
   });
-  assert.equal(r.sustainedFired, false, 'SUSTAIN blocked — trailing_max 60 < significance 71');
-  assert.equal(r.stagnationFired, true, 'STAGNATION should fire — mean recent 50 < floor 68.8');
-  assert.match(r.reason, /mean_recent_peaks/, 'reason should include mean');
+  assert.equal(r.sustainedFired, false, 'SUSTAIN blocked — trailing_max 50 < significance 71');
+  assert.equal(r.stagnationFired, true, 'STAGNATION should fire — mean recent 45 < floor 56');
+  assert.match(r.reason, /destabilized/, 'reason should say destabilized');
+  assert.match(r.reason, /baseline floor=/, 'reason should include baseline floor');
 });
 
-test('peaks high then settles low plateau → STAGNATION (Commit 11 fix)', () => {
-  // The exact failure mode Commit 11 addresses: early exceptional peak
-  // followed by a tight low plateau. Without the trailing_max gate,
-  // trailing_max would follow down to ~58, floor ≈ 49, and the 54-58
-  // peaks would clear it — mislabeling stagnation as SUSTAINED_PEAK.
-  // With the gate: trailing_max=58 < significance=71 → SUSTAIN blocked.
+test('trailing peaks at baseline mean → neither fires (plateau, not destabilization)', () => {
+  // Peaks taper but land right around baseline mean (62). Mean last 2 = 57,
+  // floor = 56 → not below floor. This is NOT destabilization — it's a
+  // moderate plateau. New rule correctly declines to fire.
   const r = runScenario({
     peaks: [86, 82, 77, 54, 56, 58],
     baselineMean: 62, baselineStd: 6,
     sessionDurationSec: 500
   });
   assert.equal(r.sustainedFired, false, 'SUSTAIN blocked — trailing_max 58 < significance 71');
-  assert.equal(r.stagnationFired, true, 'STAGNATION should fire on low plateau');
+  assert.equal(r.stagnationFired, false, 'not destabilized — peaks sit at baseline mean−σ');
+});
+
+test('destabilization fires early (only 2 prescriptions, no time gate)', () => {
+  // New rule has no 360s min-duration and only needs 2 Rx windows. A very
+  // bad early entrainment that drops far below baseline should close quickly.
+  const r = runScenario({
+    peaks: [30, 25],
+    baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: 200
+  });
+  assert.equal(r.stagnationFired, true, 'destabilization fires on 2 low Rx');
+});
+
+test('destabilization blocked before 2 prescriptions complete', () => {
+  const r = runScenario({
+    peaks: [30],
+    baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: 200
+  });
+  assert.equal(r.stagnationFired, false, 'min-Rx gate');
 });
 
 test('peaks high then holds high → SUSTAINED_PEAK (regression guard)', () => {
@@ -165,9 +182,10 @@ test('session_max at or below significance threshold → sustain does not fire',
     sessionDurationSec: 400
   });
   assert.equal(r.sustainedFired, false, 'peak below significance');
-  // Stagnation also shouldn't fire because peaks aren't declining below 80%
-  // of max (68 * 0.8 = 54.4; all peaks > 54.4).
-  assert.equal(r.stagnationFired, false, 'peaks not declining');
+  // Destabilization floor = 62 − 6 = 56. All peaks 65-68 sit above floor, so
+  // the session is neither "at a meaningful peak" nor "below baseline" — it's
+  // a mid-range plateau, correctly ignored by both rules.
+  assert.equal(r.stagnationFired, false, 'peaks above baseline floor');
 });
 
 // ---------- CLOSE_ON_UNIFIED_COHERENCE ----------
@@ -248,9 +266,9 @@ test('high TCS + BCS numeric zeros with quality ok (Path C) → falls through to
 
 test('low TCS + high BCS → neither unified nor sustained-peak fires', () => {
   // TCS peaks never clear significance (significance ≈ 71). BCS all good.
-  // Unified and sustained-peak both gated by TCS. Stagnation: rxPlayed=6,
-  // rxSincePeak = 6 - 1 = 5 ≥ 3, but trailing-max mean = 57.67 is above
-  // the 0.80 × 60 = 48 floor, so stagnation also doesn't fire.
+  // Unified and sustained-peak both gated by TCS. Destabilization: mean of
+  // last 2 peaks = 58.5, baseline floor = 62 − 6 = 56 → above floor,
+  // so STAGNATION also doesn't fire.
   const peaks = [60, 57, 58, 55, 59, 58];
   const sessionT = 400;
   const bcsSamples = fabricateBcs(sessionT, 120, 15, 'full', 75);
@@ -263,6 +281,52 @@ test('low TCS + high BCS → neither unified nor sustained-peak fires', () => {
   assert.equal(r.sustainedFired, false);
   // Stagnation may or may not fire depending on decline — either way unified
   // is the negative assertion we care about here.
+});
+
+// ---------- Sustaining mode (baseline BCS already unified) ----------
+
+test('sustaining mode bypasses 360s duration gate → SUSTAINED_PEAK fires early', () => {
+  // Baseline BCS unified → user already in a coherent state. Short session
+  // (180s) with two high-peak prescriptions should fire SUSTAINED_PEAK
+  // without waiting for the normal 360s floor.
+  const r = runScenario({
+    peaks: [86, 85],
+    baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: 180,
+    baselineBcsUnified: true
+  });
+  assert.equal(r.sustainedFired, true, 'sustaining mode: bypasses duration gate');
+});
+
+test('sustaining mode + strong BCS → UNIFIED_COHERENCE fires early', () => {
+  // Same early-close semantics but with BCS data that also clears the unified
+  // gate. Unified is preferred over sustained-peak when both qualify.
+  const peaks = [75, 78];
+  const sessionT = 200;
+  const bcsSamples = [];
+  for (let i = 0; i < 15; i++) {
+    bcsSamples.push({ t: 80 + i * 8, bcs: 75, bcsQuality: 'full' });
+  }
+  const r = runScenario({
+    peaks,
+    baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: sessionT,
+    bcsSamples,
+    baselineBcsUnified: true
+  });
+  assert.equal(r.unifiedFired, true, 'unified fires early in sustaining mode');
+  assert.equal(r.sustainedFired, false, 'sustained preempted by unified');
+});
+
+test('no sustaining mode + short session → gates still enforced (regression guard)', () => {
+  // Without sustaining mode, the 360s floor should still block everything.
+  const r = runScenario({
+    peaks: [86, 85],
+    baselineMean: 62, baselineStd: 6,
+    sessionDurationSec: 180,
+    baselineBcsUnified: false
+  });
+  assert.equal(r.sustainedFired, false, 'duration gate active when sustaining mode off');
 });
 
 test('session < unified_min_duration_sec → unified blocked, sustained also blocked', () => {

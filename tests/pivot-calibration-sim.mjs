@@ -184,9 +184,9 @@ function runSimulation(baseProfile, label, opts = {}) {
   const sustainRatio = config.sustain_ratio ?? 0.85;
   const sustainWindows = config.sustain_windows ?? 2;
   const trailingMaxWindows = config.trailing_max_windows ?? 3;
-  const stagnationMinRx = config.stagnation_min_prescriptions ?? 6;
-  const stagnationWindows = config.stagnation_windows ?? 3;
-  const stagnationDeclineRatio = config.stagnation_decline_ratio ?? 0.80;
+  const destabilizationK = config.destabilization_k_std ?? 1.0;
+  const destabilizationMinRx = config.destabilization_min_prescriptions ?? 2;
+  const destabilizationWindows = config.destabilization_windows ?? 2;
   const unifiedMinDur = config.unified_min_duration_sec ?? 360;
   const unifiedBcsWindow = config.unified_bcs_window_sec ?? 120;
   const unifiedBcsMinValid = config.unified_bcs_min_valid_samples ?? 12;
@@ -219,7 +219,6 @@ function runSimulation(baseProfile, label, opts = {}) {
   let hasPivotedEver = false;
   let sessionMaxTcs = 0;
   const prescriptionPeaks = [];
-  let prescriptionOfSessionMax = 0;
   let lastHint = 'PIVOT';
   let closed = false;
 
@@ -412,21 +411,17 @@ function runSimulation(baseProfile, label, opts = {}) {
           break;
         }
 
-        // CLOSE_ON_STAGNATION (9a: require declining peaks; 9c: duration gate)
-        const rxSincePeak = metrics.prescriptionsPlayed - prescriptionOfSessionMax;
-        if (
-          sessionT >= successMinDur &&
-          metrics.prescriptionsPlayed >= stagnationMinRx &&
-          rxSincePeak >= stagnationWindows &&
-          recent.length >= stagnationWindows
-        ) {
-          const stagRecent = prescriptionPeaks.slice(-stagnationWindows);
-          const meanRecent = stagRecent.reduce((a, b) => a + b, 0) / stagRecent.length;
-          const stagFloor = stagnationDeclineRatio * sessionMaxTcs;
-          if (meanRecent < stagFloor) {
-            closeWith('STAGNATION',
-              `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak}, mean_recent_peaks=${meanRecent.toFixed(1)} < floor=${stagFloor.toFixed(1)} [${Math.round(stagnationDeclineRatio * 100)}% of session_max ${sessionMaxTcs.toFixed(1)}])`);
-            break;
+        // CLOSE_ON_STAGNATION (destabilization: trailing peaks below baseline floor)
+        if (metrics.prescriptionsPlayed >= destabilizationMinRx) {
+          const stagRecent = prescriptionPeaks.slice(-destabilizationWindows);
+          if (stagRecent.length >= destabilizationWindows) {
+            const meanRecent = stagRecent.reduce((a, b) => a + b, 0) / stagRecent.length;
+            const stagFloor = baselineTcsMean - destabilizationK * baselineTcsStd;
+            if (meanRecent < stagFloor) {
+              closeWith('STAGNATION',
+                `destabilized — trailing peaks mean=${meanRecent.toFixed(1)} < baseline floor=${stagFloor.toFixed(1)} (μ=${baselineTcsMean.toFixed(1)} σ=${baselineTcsStd.toFixed(1)}, k=${destabilizationK})`);
+              break;
+            }
           }
         }
       }
@@ -460,23 +455,17 @@ function runSimulation(baseProfile, label, opts = {}) {
           }
           if (!usePrePatchLogic) {
             prescriptionPeaks.push(tcsMaxInState);
-            if (tcsMaxInState > sessionMaxTcs) {
-              sessionMaxTcs = tcsMaxInState;
-              prescriptionOfSessionMax = metrics.prescriptionsPlayed;
-            }
-            const rxSincePeak = metrics.prescriptionsPlayed - prescriptionOfSessionMax;
-            if (
-              sessionT >= successMinDur &&
-              metrics.prescriptionsPlayed >= stagnationMinRx &&
-              rxSincePeak >= stagnationWindows
-            ) {
-              const stagRecent = prescriptionPeaks.slice(-stagnationWindows);
-              const meanRecent = stagRecent.reduce((a, b) => a + b, 0) / stagRecent.length;
-              const stagFloor = stagnationDeclineRatio * sessionMaxTcs;
-              if (meanRecent < stagFloor) {
-                closeWith('STAGNATION',
-                  `no further gains — diminishing returns (Rx_since_peak=${rxSincePeak}, mean_recent_peaks=${meanRecent.toFixed(1)} < floor=${stagFloor.toFixed(1)})`);
-                break;
+            if (tcsMaxInState > sessionMaxTcs) sessionMaxTcs = tcsMaxInState;
+            if (metrics.prescriptionsPlayed >= destabilizationMinRx) {
+              const stagRecent = prescriptionPeaks.slice(-destabilizationWindows);
+              if (stagRecent.length >= destabilizationWindows) {
+                const meanRecent = stagRecent.reduce((a, b) => a + b, 0) / stagRecent.length;
+                const stagFloor = baselineTcsMean - destabilizationK * baselineTcsStd;
+                if (meanRecent < stagFloor) {
+                  closeWith('STAGNATION',
+                    `destabilized — trailing peaks mean=${meanRecent.toFixed(1)} < baseline floor=${stagFloor.toFixed(1)} (μ=${baselineTcsMean.toFixed(1)} σ=${baselineTcsStd.toFixed(1)}, k=${destabilizationK})`);
+                  break;
+                }
               }
             }
           }
@@ -584,7 +573,7 @@ console.log(`peak significance K: ${config.peak_significance_k}  (threshold = μ
 console.log(`slope-veto threshold: +${config.slope_veto_threshold} TCS across window (mean last 5 − mean first 5)`);
 console.log(`CLOSE_ON_UNIFIED_COHERENCE: t≥${config.unified_min_duration_sec}s, TCS sustain-peak gates + ≥${config.unified_bcs_min_valid_samples} full BCS samples in last ${config.unified_bcs_window_sec}s with ≥${Math.round(config.unified_bcs_sustain_ratio * 100)}% ≥ BCS ${config.bcs_significance_threshold}`);
 console.log(`CLOSE_ON_SUSTAINED_PEAK: t≥${config.success_min_duration_sec}s, last ${config.sustain_windows} peaks ≥ ${Math.round(config.sustain_ratio * 100)}% of trailing_max (max of last ${config.trailing_max_windows} peaks)`);
-console.log(`CLOSE_ON_STAGNATION: t≥${config.success_min_duration_sec}s, ≥${config.stagnation_min_prescriptions} Rx, no session_max update in ${config.stagnation_windows} windows, mean recent peaks < ${Math.round(config.stagnation_decline_ratio * 100)}% of session_max`);
+console.log(`CLOSE_ON_STAGNATION: ≥${config.destabilization_min_prescriptions} Rx, mean of last ${config.destabilization_windows} peaks < baseline_μ − ${config.destabilization_k_std}·σ (destabilization below baseline)`);
 console.log(`time cap (new/old): ${config.session_max_duration_sec}s / 1800s (safety net)`);
 console.log();
 

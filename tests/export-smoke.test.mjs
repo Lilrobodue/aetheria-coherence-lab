@@ -194,7 +194,7 @@ test('UNIFIED_COHERENCE reason has all diagnostic fields populated', () => {
     for (const p of peaks) {
       e._frequencyHistory.push({ frequency_hz: 100 });
       e._prescriptionPeaks.push(p);
-      if (p > e._sessionMaxTcs) { e._sessionMaxTcs = p; e._prescriptionOfSessionMax = e._frequencyHistory.length; }
+      if (p > e._sessionMaxTcs) e._sessionMaxTcs = p;
     }
     for (let i = 0; i < 15; i++) {
       e._bcsSamples.push({ t: 280 + i * 8, bcs: 75, bcsQuality: 'full' });
@@ -218,7 +218,7 @@ test('SUSTAINED_PEAK reason has session_max, trailing_max, recent_peaks', () => 
     for (const p of peaks) {
       e._frequencyHistory.push({ frequency_hz: 100 });
       e._prescriptionPeaks.push(p);
-      if (p > e._sessionMaxTcs) { e._sessionMaxTcs = p; e._prescriptionOfSessionMax = e._frequencyHistory.length; }
+      if (p > e._sessionMaxTcs) e._sessionMaxTcs = p;
     }
   });
   assert.ok(reason, 'SUSTAINED_PEAK should fire');
@@ -229,7 +229,7 @@ test('SUSTAINED_PEAK reason has session_max, trailing_max, recent_peaks', () => 
   assert.doesNotMatch(reason, /undefined|NaN/);
 });
 
-test('STAGNATION reason has mean_recent_peaks, decline ratio, session_max', () => {
+test('STAGNATION reason has trailing peaks mean, baseline floor, μ, σ, k', () => {
   const reason = runEngineAndCaptureReason((e) => {
     e._baselineTcsMean = 62; e._baselineTcsStd = 6;
     e._sessionStart = (performance.now() / 1000) - 500;
@@ -237,15 +237,16 @@ test('STAGNATION reason has mean_recent_peaks, decline ratio, session_max', () =
     for (const p of peaks) {
       e._frequencyHistory.push({ frequency_hz: 100 });
       e._prescriptionPeaks.push(p);
-      if (p > e._sessionMaxTcs) { e._sessionMaxTcs = p; e._prescriptionOfSessionMax = e._frequencyHistory.length; }
+      if (p > e._sessionMaxTcs) e._sessionMaxTcs = p;
     }
   });
   assert.ok(reason, 'STAGNATION should fire');
-  assert.match(reason, /no further gains/);
-  assert.match(reason, /Rx_since_peak=\d+/);
-  assert.match(reason, /mean_recent_peaks=\d+(\.\d+)?/);
-  assert.match(reason, /floor=\d+(\.\d+)?/);
-  assert.match(reason, /session_max/);
+  assert.match(reason, /destabilized/);
+  assert.match(reason, /trailing peaks mean=\d+(\.\d+)?/);
+  assert.match(reason, /baseline floor=\d+(\.\d+)?/);
+  assert.match(reason, /μ=\d+(\.\d+)?/);
+  assert.match(reason, /σ=\d+(\.\d+)?/);
+  assert.match(reason, /k=\d+(\.\d+)?/);
   assert.doesNotMatch(reason, /undefined|NaN/);
 });
 
