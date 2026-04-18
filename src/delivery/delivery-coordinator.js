@@ -125,8 +125,22 @@ export class DeliveryCoordinator {
       const saved = parseFloat(localStorage.getItem('aetheria_heartbeat_strength'));
       if (isFinite(saved)) strength = Math.min(3.0, Math.max(0.5, saved));
     } catch {}
+
+    // BinauralPlayer's masterGain defaults to 0.01 (silent). In a real
+    // session the closing frequency ramps it up before heartbeat fires, but
+    // the test button hits heartbeat cold with masterGain still at 0.01 —
+    // attenuating the pulse ~100× and making it inaudible / unfeelable.
+    // Ramp to unity here if it's below audible, over 50ms so we don't click.
+    const mg = this._binaural.masterGain;
+    const now = this._audioCtx.currentTime;
+    if (mg.gain.value < 0.5) {
+      mg.gain.cancelScheduledValues(now);
+      mg.gain.setValueAtTime(mg.gain.value, now);
+      mg.gain.linearRampToValueAtTime(1.0, now + 0.05);
+    }
+
     console.log(`Delivery: playing heartbeat signature (strength ${strength.toFixed(1)}×)`);
-    await playHeartbeatSignature(this._audioCtx, this._binaural.masterGain, 60, strength);
+    await playHeartbeatSignature(this._audioCtx, mg, 60, strength);
   }
 
   /** Set master volume (0-1). */
