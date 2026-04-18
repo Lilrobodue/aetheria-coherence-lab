@@ -60,6 +60,9 @@ export class PolicyEngine {
     // Trimmed to ~30 samples (~5 min at 0.1 Hz) to cover any reasonable
     // unified_bcs_window_sec.
     this._bcsSamples = [];
+    // Rolling buffer of TCS samples at 1Hz for close-time trajectory logging.
+    // Capped at 120 entries (~2 min) — long enough to cover the slope window.
+    this._tcsSamples = [];
     this._goalSustainStart = null;
     this._hugPeakTcs = 0;
     this._hugPeakLostSince = null;
@@ -84,7 +87,13 @@ export class PolicyEngine {
 
     // Subscribe to coherence and feature data
     this._unsubscribers.push(
-      this.bus.subscribe('Aetheria_Coherence', (p) => { this._latestCoherence = p; }),
+      this.bus.subscribe('Aetheria_Coherence', (p) => {
+        this._latestCoherence = p;
+        if (p && p.tcs != null && isFinite(p.tcs)) {
+          this._tcsSamples.push({ t: this.sessionDuration, tcs: p.tcs });
+          if (this._tcsSamples.length > 120) this._tcsSamples.shift();
+        }
+      }),
       this.bus.subscribe('Aetheria_Features', (p) => {
         if (p.type === 'all_features') this._latestFeatures = p;
       }),
@@ -500,6 +509,10 @@ export class PolicyEngine {
     if (above.length / valid.length < bcsSustainRatio) return false;
 
     const bcsMean = valid.reduce((a, b) => a + b.bcs, 0) / valid.length;
+    if (this.sessionDuration < minDur && this._baselineBcsUnified) {
+      const saved = minDur - this.sessionDuration;
+      console.log(`Policy: sustaining-mode bypass — UNIFIED_COHERENCE fired at ${this.sessionDuration.toFixed(1)}s (normal gate at ${minDur}s, saved ${saved.toFixed(1)}s). Without bypass: would have continued entrainment.`);
+    }
     this._enterClosing(
       `unified coherence held — TCS sustained=${recentTcs.length}/${sustainWindows}, BCS valid=${valid.length}, BCS above-threshold=${above.length}/${valid.length} (session_max_tcs=${this._sessionMaxTcs.toFixed(1)}, bcs_mean=${bcsMean.toFixed(1)})`
     );
@@ -553,6 +566,10 @@ export class PolicyEngine {
     if (!recent.every(p => p >= floor)) return false;
 
     const recentStr = recent.map(p => p.toFixed(1)).join(', ');
+    if (this.sessionDuration < minDur && this._baselineBcsUnified) {
+      const saved = minDur - this.sessionDuration;
+      console.log(`Policy: sustaining-mode bypass — SUSTAINED_PEAK fired at ${this.sessionDuration.toFixed(1)}s (normal gate at ${minDur}s, saved ${saved.toFixed(1)}s). Without bypass: would have continued entrainment.`);
+    }
     this._enterClosing(`coherence held — closing on peak (session_max=${this._sessionMaxTcs.toFixed(1)}, trailing_max=${trailingMax.toFixed(1)}, recent_peaks=[${recentStr}])`);
     return true;
   }
@@ -628,7 +645,45 @@ export class PolicyEngine {
     return true;
   }
 
+  // Least-squares slope (value per 60s) across `samples` filtered to the last
+  // `windowSec` seconds. Returns { slope, n }. slope is null when fewer than
+  // 3 samples fall in the window or the time spread is zero.
+  _slopePer60s(samples, windowSec, valueKey) {
+    const now = this.sessionDuration;
+    const recent = samples.filter(s =>
+      s.t != null && now - s.t <= windowSec && s[valueKey] != null && isFinite(s[valueKey])
+    );
+    const n = recent.length;
+    if (n < 3) return { slope: null, n };
+    const tMean = recent.reduce((a, s) => a + s.t, 0) / n;
+    const vMean = recent.reduce((a, s) => a + s[valueKey], 0) / n;
+    let num = 0, den = 0;
+    for (const s of recent) {
+      const dt = s.t - tMean;
+      num += dt * (s[valueKey] - vMean);
+      den += dt * dt;
+    }
+    if (den === 0) return { slope: null, n };
+    return { slope: (num / den) * 60, n };
+  }
+
   _enterClosing(reason) {
+    // Close-time trajectory — retrospective evidence for "was this close
+    // premature?" Applies to every close path; not part of the reason string.
+    const tcsTraj = this._slopePer60s(this._tcsSamples, 60, 'tcs');
+    const bcsFull = this._bcsSamples.filter(s => s.bcsQuality === 'full');
+    const bcsTraj = this._slopePer60s(bcsFull, 120, 'bcs');
+    const fmt = (x) => x == null ? 'n/a' : (x >= 0 ? '+' : '') + x.toFixed(1);
+    let verdict;
+    if (tcsTraj.slope != null && bcsTraj.slope != null) {
+      if (tcsTraj.slope > 0 && bcsTraj.slope > 0) verdict = 'deepening at close';
+      else if (tcsTraj.slope < 0 && bcsTraj.slope < 0) verdict = 'stable or declining';
+      else verdict = 'mixed';
+    } else {
+      verdict = 'insufficient data';
+    }
+    console.log(`Policy: trajectory at close — TCS slope ${fmt(tcsTraj.slope)}/60s (n=${tcsTraj.n}), BCS slope ${fmt(bcsTraj.slope)}/60s (n=${bcsTraj.n}). Verdict: ${verdict}.`);
+
     // Select closing frequency: leading regime, digital root 9, deepest octave
     const V = this._latestCoherence;
     const leadRegime = V?.lead || 'HEART';
