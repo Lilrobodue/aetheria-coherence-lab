@@ -8,12 +8,12 @@
 //
 // Delivered through the Woojer as a felt heartbeat in the chest.
 // The fundamental is 64 Hz / ~51 Hz (dub) — Woojer's strong haptic band.
-// Each pulse uses a pi-envelope (half-sine bell, sin(π·t/duration)) so
-// the waveform rises and falls with no sharp edges. In isolation this
-// pulse is effectively silent through studio headphones but felt firmly
-// in the chest — provided the closing-frequency carriers have been faded
-// out first, which DeliveryCoordinator.playHeartbeat() does before
-// invoking this function.
+// Each pulse uses a Tukey envelope (half-cosine rise + flat hold +
+// half-cosine fall) — the flat hold gives the original method's
+// percussive felt strength, and the curved edges give the pi envelope's
+// smoothness (no click harmonics in the headphone passthrough). Requires
+// DeliveryCoordinator.playHeartbeat() to have faded the closing-frequency
+// carriers out first so the pulse plays against silence.
 
 /**
  * Play the heartbeat end-signature through the Woojer.
@@ -66,15 +66,28 @@ function _pulse(ctx, destination, startTime, duration, freqHz, amplitude) {
   // (>2.5×) can't drive the gain node into clipping territory at the DAC.
   const peak = Math.min(amplitude * 0.55, 0.95);
   const gain = ctx.createGain();
-  // Pi envelope — half-sine bell: gain(t) = peak · sin(π · t/duration).
-  // Rises from 0 to peak at midpoint, falls back to 0 at end. No sharp
-  // edges, so zero click harmonics in the headphone passthrough, but the
-  // Woojer still feels a firm thump from the integrated energy under the
-  // bell. 64 samples is ample smoothness for an 80 ms pulse.
-  const N = 64;
+  // Tukey envelope — half-cosine rise, flat peak hold, half-cosine fall.
+  // The 60% flat hold gives the original trapezoidal method's strong
+  // sustained drive into the Woojer's voice coil; the 20% cosine tapers
+  // on each end have zero slope at the endpoints so there are no sharp
+  // corners to produce click harmonics. Strength of the original +
+  // smoothness of the pi envelope.
+  const N = 128;
   const curve = new Float32Array(N);
+  const riseFrac = 0.2;
+  const fallFrac = 0.2;
   for (let i = 0; i < N; i++) {
-    curve[i] = peak * Math.sin(Math.PI * i / (N - 1));
+    const t = i / (N - 1);
+    let g;
+    if (t < riseFrac) {
+      g = (1 - Math.cos(Math.PI * t / riseFrac)) / 2;
+    } else if (t < 1 - fallFrac) {
+      g = 1;
+    } else {
+      const x = (t - (1 - fallFrac)) / fallFrac;
+      g = (1 + Math.cos(Math.PI * x)) / 2;
+    }
+    curve[i] = peak * g;
   }
   gain.gain.setValueCurveAtTime(curve, startTime, duration);
 
