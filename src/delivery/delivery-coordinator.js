@@ -126,11 +126,25 @@ export class DeliveryCoordinator {
       if (isFinite(saved)) strength = Math.min(3.0, Math.max(0.5, saved));
     } catch {}
 
+    // Silence the accompanying binaural carriers before the heartbeat so the
+    // pulse plays pure — headphones go quiet, only the felt chest thump
+    // remains. Without this fade, the ~200 Hz carriers for the closing
+    // frequency sit on top of the sub-bass pulses and turn the heartbeat
+    // into a tonal event instead of a pure haptic one. The test button
+    // path has no carriers running, so this block is a no-op there.
+    if (this._binaural.playing) {
+      const fadeSec = 0.8;
+      this._binaural.stop(fadeSec);
+      this._woojer.stop(fadeSec);
+      this._currentFrequency = null;
+      this.bus.publish('Aetheria_Audio', { action: 'stop' });
+      this.bus.publish('Aetheria_Haptic', { action: 'stop' });
+      await new Promise(r => setTimeout(r, fadeSec * 1000));
+    }
+
     // BinauralPlayer's masterGain defaults to 0.01 (silent). In a real
-    // session the closing frequency ramps it up before heartbeat fires, but
-    // the test button hits heartbeat cold with masterGain still at 0.01 —
-    // attenuating the pulse ~100× and making it inaudible / unfeelable.
-    // Ramp to unity here if it's below audible, over 50ms so we don't click.
+    // session the closing frequency has already ramped it to 1.0 and the
+    // fade above leaves masterGain untouched. On cold test fire, raise it.
     const mg = this._binaural.masterGain;
     const now = this._audioCtx.currentTime;
     if (mg.gain.value < 0.5) {
@@ -140,7 +154,7 @@ export class DeliveryCoordinator {
     }
 
     console.log(`Delivery: playing heartbeat signature (strength ${strength.toFixed(1)}×)`);
-    await playHeartbeatSignature(this._audioCtx, mg, 60, strength);
+    await playHeartbeatSignature(this._audioCtx, mg, 64, strength);
   }
 
   /** Set master volume (0-1). */
