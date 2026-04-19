@@ -2,7 +2,7 @@
 // The closing heartbeat end-signature from Doc 3 §2.7.
 //
 // Three cycles of LUB-dub, slowing and softening:
-//   Cycle 1: LUB (80ms) . dub (60ms) — interval ~0.9s, 100% amplitude
+//   Cycle 1: LUB (140ms) . dub (100ms) — interval ~0.9s, 100% amplitude
 //   Cycle 2: LUB . dub — interval ~1.1s, 75% amplitude
 //   Cycle 3: LUB . dub — interval ~1.4s, 50% amplitude → silence
 //
@@ -25,19 +25,17 @@
  *   Sits in the Woojer's strong haptic band for a firm chest thump
  *   that can be felt through clothing.
  * @param {number} [strength=1.0] - multiplier on cycle amplitude. The default
- *   1.0 preserves the original 0.4-peak envelope. Values up to ~2.5 can
- *   be felt through clothing on the Woojer; 3.0 is the safe ceiling
- *   before the per-pulse gain would clip at the DAC. _pulse() clamps
- *   the computed peak to 0.95 as a final safety net.
+ *   1.0 produces a 0.55-peak bell. Values above ~1.7 hit the 0.95 clamp
+ *   in _pulse() (safety net against DAC clipping) and stop scaling.
  * @returns {Promise<void>}
  */
 export async function playHeartbeatSignature(ctx, destination, baseFreqHz = 64, strength = 1.0) {
   if (ctx.state === 'suspended') await ctx.resume();
 
   const cycles = [
-    { lubDuration: 0.08, dubDuration: 0.06, dubDelay: 0.15, interval: 0.9, amplitude: 1.0 },
-    { lubDuration: 0.08, dubDuration: 0.06, dubDelay: 0.15, interval: 1.1, amplitude: 0.75 },
-    { lubDuration: 0.08, dubDuration: 0.06, dubDelay: 0.15, interval: 1.4, amplitude: 0.50 },
+    { lubDuration: 0.14, dubDuration: 0.10, dubDelay: 0.20, interval: 0.9, amplitude: 1.0 },
+    { lubDuration: 0.14, dubDuration: 0.10, dubDelay: 0.20, interval: 1.1, amplitude: 0.75 },
+    { lubDuration: 0.14, dubDuration: 0.10, dubDelay: 0.20, interval: 1.4, amplitude: 0.50 },
   ];
 
   let t = ctx.currentTime + 0.05; // small lead-in
@@ -66,7 +64,7 @@ function _pulse(ctx, destination, startTime, duration, freqHz, amplitude) {
 
   // Peak is amplitude * 0.4 baseline. Clamp at 0.95 so boosted strengths
   // (>2.5×) can't drive the gain node into clipping territory at the DAC.
-  const peak = Math.min(amplitude * 0.4, 0.95);
+  const peak = Math.min(amplitude * 0.55, 0.95);
   const gain = ctx.createGain();
   // Pi envelope — half-sine bell: gain(t) = peak · sin(π · t/duration).
   // Rises from 0 to peak at midpoint, falls back to 0 at end. No sharp
