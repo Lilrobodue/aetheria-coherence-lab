@@ -149,6 +149,7 @@ export class SessionRecorder {
     // must distinguish "no measurement" from "zero measurement."
     const round = (v, d) => v == null ? null : +v.toFixed(d);
     this._sub('Aetheria_BCS', (p) => {
+      const pt = p.phaseTransition || {};
       this._streams.bcs.push({
         t: this._relTime(p.timestamp),
         bcs: round(p.bcs, 1),
@@ -157,7 +158,9 @@ export class SessionRecorder {
         sharedEnergy: round(p.sharedEnergy, 3),
         sharedEnergyQuality: p.sharedEnergyQuality || null,
         mutualInfo: round(p.mutualInfo, 3),
-        phaseTransition: p.phaseTransition?.detected || false
+        phaseTransition: pt.detected || false,
+        ptWindow: pt.window ?? 0,
+        ptDuration: pt.durationTicks ?? 0,
       });
     });
 

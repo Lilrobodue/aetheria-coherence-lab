@@ -10,7 +10,7 @@
 import { kuramotoFromEnvelopes } from './kuramoto.js';
 import { sharedModeEnergyFraction } from './memd.js';
 import { meanPairwiseNMI } from './mutual-information.js';
-import { detectPhaseTransition } from './phase-transition.js';
+import { PhaseTransitionDetector } from './phase-transition.js';
 import { lowpass, resampleLinear } from '../math/filters.js';
 
 /**
@@ -61,14 +61,20 @@ export class BCSEngine {
     this._headValues = [];
     this._headTimestamps = [];
 
-    // BCS history for phase transition detection
+    // BCS history kept for any future analysis (rolling buffer).
     this._bcsHistory = [];
+
+    // Phase transition detector (stateful, hysteresis-based — see phase-transition.js).
+    this._ptDetector = new PhaseTransitionDetector();
 
     // Latest values — null until first successful compute.
     this.latestBCS = null;
     this.latestBCSQuality = null;
     this.latestComponents = { kuramoto: null, sharedEnergy: null, sharedEnergyQuality: null, mutualInfo: null };
-    this.phaseTransition = { detected: false, time: null, magnitude: null };
+    // Kept to old shape for backward compat with state-machine / viz consumers.
+    // `time` is the most recent fire time; `magnitude` is unused in the
+    // hysteresis model (carried as null) — consumers only check `.detected`.
+    this.phaseTransition = { detected: false, time: null, magnitude: null, window: 0, durationTicks: 0 };
 
     // Calibrated 2026-04-17 after session analysis: sensor settling produced a bogus phase_transition_time_seconds=1.69 in an observed session; suppress detections during warmup.
     this._sessionStartSec = null;
@@ -122,6 +128,29 @@ export class BCSEngine {
     this._interval = null;
     for (const unsub of this._unsubscribers) unsub();
     this._unsubscribers = [];
+  }
+
+  /**
+   * Reset per-session state so a new session starts with a clean slate.
+   * Called from main.js at session-start alongside the CoherenceEngine +
+   * FeatureEngine resets. Without this, the prior session's BCS history
+   * and phase-transition detector state would carry forward.
+   */
+  reset() {
+    this._gutValues = [];
+    this._gutTimestamps = [];
+    this._heartValues = [];
+    this._heartTimestamps = [];
+    this._headValues = [];
+    this._headTimestamps = [];
+    this._bcsHistory = [];
+    this._ptDetector.reset();
+    this._sessionStartSec = null;
+    this.latestBCS = null;
+    this.latestBCSQuality = null;
+    this.latestComponents = { kuramoto: null, sharedEnergy: null, sharedEnergyQuality: null, mutualInfo: null };
+    this.phaseTransition = { detected: false, time: null, magnitude: null, window: 0, durationTicks: 0 };
+    console.log('BCSEngine: reset for new session');
   }
 
   _trimTo60s() {
@@ -188,20 +217,32 @@ export class BCSEngine {
     };
     this.latestBCSQuality = bcsQuality;
 
-    // Track BCS history for phase transition detection — skip null samples
-    // so the detector isn't fed synthetic zeros from no-measurement ticks.
+    // Track BCS history (kept for analytics) and update the hysteresis
+    // phase-transition detector. Null BCS samples are passed through as-is
+    // so the detector can hold state without being tricked by synthetic zeros.
+    const nowSec = performance.now() / 1000;
     if (bcs != null) {
-      this._bcsHistory.push({ time: performance.now() / 1000, bcs });
+      this._bcsHistory.push({ time: nowSec, bcs });
       if (this._bcsHistory.length > 200) this._bcsHistory.shift();
-      this.phaseTransition = detectPhaseTransition(this._bcsHistory);
+    }
 
-      // Calibrated 2026-04-17 after session analysis: sensor warmup can look like a phase transition; suppress any detection inside the warmup window.
-      const sessionAge = this._sessionStartSec != null
-        ? (performance.now() / 1000 - this._sessionStartSec)
-        : Infinity;
-      if (sessionAge < this._warmupSec && this.phaseTransition.detected) {
-        this.phaseTransition = { detected: false, time: null, magnitude: null };
-      }
+    const sessionAge = this._sessionStartSec != null
+      ? (nowSec - this._sessionStartSec)
+      : Infinity;
+
+    // Warmup suppression: inside the warmup window, don't let the detector
+    // progress its consecutive counters — pretend the tick didn't happen.
+    if (sessionAge >= this._warmupSec) {
+      const ptState = this._ptDetector.update(bcs, nowSec);
+      this.phaseTransition = {
+        detected: ptState.active,
+        time: ptState.fireTime,
+        magnitude: null, // n/a in the level-hysteresis model
+        window: ptState.window,
+        durationTicks: ptState.durationTicks,
+        justFired: ptState.justFired,
+        justCleared: ptState.justCleared,
+      };
     }
 
     // Publish

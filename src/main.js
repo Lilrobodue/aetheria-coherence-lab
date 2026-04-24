@@ -344,6 +344,7 @@ async function toggleSession() {
     // at ~0.05 with sd≈0.003 in session Joe-new-aetheria-session-2).
     app.coherenceEngine.reset();
     app.featureEngine.reset();
+    app.bcsEngine.reset();
 
     // Start recording
     const sessionId = new Date().toISOString().slice(0, 10) + '_' + Date.now();

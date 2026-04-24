@@ -7,6 +7,16 @@ import { RegimeScorer } from './regime-scoring.js';
 import { extractEnvelope, computeTriunePLV, detectHarmonicLock, ENVELOPE_BANDS } from './cross-regime.js';
 import { computeTCS } from './tcs.js';
 
+// Added 2026-04-24 after 12-session harm audit: `detectHarmonicLock` returns a
+// high score whenever cross-regime dominant frequencies hit 3-6-9 ratios, even
+// when the regime scores themselves are tiny. Example false positive from the
+// April 24 session at t=360.7s: GUT=0.219, HEART=0.222, HEAD=0.631 → harm=1.0
+// despite two regimes being near silence. Solution: before accepting a harm
+// value, scale it by how far the weakest regime is below this floor. A regime
+// at or above the floor contributes no penalty; below the floor the penalty
+// grows linearly to 0. A regime at zero nullifies harm entirely.
+export const HARM_REGIME_FLOOR = 0.4;
+
 export class CoherenceEngine {
   constructor(bus, config) {
     this.bus = bus;
@@ -140,7 +150,20 @@ export class CoherenceEngine {
       : null;
 
     const { triunePLV, plvGH, plvHD, plvGD } = computeTriunePLV(gutEnv, heartEnv, headEnv);
-    const harmonicLock = detectHarmonicLock(gutEnv, heartEnv, headEnv);
+    let harmonicLock = detectHarmonicLock(gutEnv, heartEnv, headEnv);
+
+    // Harm regime-magnitude floor (see HARM_REGIME_FLOOR docstring). Scale
+    // harm down when the weakest online regime is below the floor; null
+    // regimes aren't considered (they can't vote on harm they're not in).
+    if (harmonicLock != null && isFinite(harmonicLock)) {
+      const onlineScores = [gut?.sigmoid, heart?.sigmoid, head?.sigmoid]
+        .filter(v => v != null && isFinite(v));
+      if (onlineScores.length > 0) {
+        const weakest = Math.min(...onlineScores);
+        const floorPenalty = Math.max(0, Math.min(1, weakest / HARM_REGIME_FLOOR));
+        harmonicLock = harmonicLock * floorPenalty;
+      }
+    }
 
     // --- TCS with dynamic reweighting ---
     const { tcs, confidence } = computeTCS({
