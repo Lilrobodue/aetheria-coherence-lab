@@ -1,6 +1,6 @@
 // Aetheria Coherence Lab — Service Worker
 // Cache-first for modules/assets, network-first for HTML
-const CACHE_NAME = 'aetheria-v24';
+const CACHE_NAME = 'aetheria-v25';
 
 const APP_SHELL = [
   './',
@@ -47,6 +47,9 @@ const APP_SHELL = [
   './policy/arousal-anchor.js',
   './policy/selection-rules.js',
   './policy/state-machine.js',
+  './policy/baseline-classifier.js',
+  './policy/baseline-stats.js',
+  './policy/protocols.js',
   // delivery
   './delivery/audio-binaural.js',
   './delivery/haptic-woojer.js',
