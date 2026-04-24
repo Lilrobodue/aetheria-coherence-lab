@@ -99,6 +99,11 @@ export class PolicyEngine {
     this._targetRegime = null;
     this._targetRegimeAttempts = 0;   // distinct frequencies tried in current regime
     this._targetRegimePeaks = [];     // TCS peak achieved per target-regime prescription
+    this._targetRegimeCoherencePeaks = []; // regime-coherence peak (0-1) per target-regime prescription
+    this._targetRegimeCoherenceMeans = []; // regime-coherence mean (0-1) per target-regime prescription
+    this._regimeCoherenceMaxInState = 0;   // max target-regime coherence observed in current ENTRAIN
+    this._regimeCoherenceSumInState = 0;   // accumulator for mean
+    this._regimeCoherenceCountInState = 0;
     this._targetRegimeFreqs = new Set(); // frequency_hz values played while in this regime
     this._regimeHistory = [];         // [{regime, attempts, peaks, escalated:boolean, at:t}]
     // Last enriched reason block — attached to the next ASSESS→PRESCRIBE transition.
@@ -635,6 +640,11 @@ export class PolicyEngine {
     this._targetRegime = newRegime;
     this._targetRegimeAttempts = 0;
     this._targetRegimePeaks = [];
+    this._targetRegimeCoherencePeaks = [];
+    this._targetRegimeCoherenceMeans = [];
+    this._regimeCoherenceMaxInState = 0;
+    this._regimeCoherenceSumInState = 0;
+    this._regimeCoherenceCountInState = 0;
     this._targetRegimeFreqs = new Set();
   }
 
@@ -643,22 +653,39 @@ export class PolicyEngine {
         this._currentFrequency.regime === this._targetRegime &&
         isFinite(this._tcsMaxInState) && this._tcsMaxInState > 0) {
       this._targetRegimePeaks.push(this._tcsMaxInState);
+      if (isFinite(this._regimeCoherenceMaxInState) && this._regimeCoherenceMaxInState > 0) {
+        this._targetRegimeCoherencePeaks.push(this._regimeCoherenceMaxInState);
+      }
+      if (this._regimeCoherenceCountInState > 0) {
+        const m = this._regimeCoherenceSumInState / this._regimeCoherenceCountInState;
+        if (isFinite(m)) this._targetRegimeCoherenceMeans.push(m);
+      }
     }
   }
 
+  // Cross-regime escalation (targeted-selection spec §3.3, sustain-based
+  // tuning applied 2026-04-24 after session Joe-aetheria-session-4):
+  //
+  // The spec's peaks-only rule proved too lenient in practice — session 4 ran
+  // 11 HEART prescriptions over 15 minutes with strong peaks (up to 0.83) but
+  // a *post-baseline regime coherence mean* of 0.463 against a baseline of
+  // 0.445 (basically no sustain). The peak-based rule would not escalate;
+  // the sustain-based rule does.
+  //
+  // Sustain rule: escalate when, over the last N prescriptions, the mean of
+  // per-prescription regime-coherence means fails to climb above
+  // baseline_regime_mean + regime_exhaustion_mean_delta.
   _shouldEscalateRegime() {
     const minAttempts = this.config.regime_exhaustion_attempts ?? 3;
-    const ratio = this.config.regime_exhaustion_peak_ratio ?? 0.55;
+    const delta = this.config.regime_exhaustion_mean_delta ?? 0.10;
     if (this._targetRegimeAttempts < minAttempts) return false;
-    if (this._targetRegimePeaks.length < minAttempts) return false;
-    // Target regime's baseline mean * 100 gives a TCS-comparable scale only
-    // loosely; instead compare to baseline TCS mean (session-relative) or a
-    // configured TCS-peak floor. We use baseline_tcs_mean * ratio as the bar
-    // — a "meaningful" peak is at least this fraction of baseline TCS.
-    const baselineTcs = this._baselineTcsMean ?? 50;
-    const peakFloor = ratio * baselineTcs * (100 / 100); // kept explicit for clarity
-    const bestPeak = Math.max(...this._targetRegimePeaks);
-    return bestPeak < peakFloor;
+    if (this._targetRegimeCoherenceMeans.length < minAttempts) return false;
+    const regimeBaseline = this._baselineStats?.[this._targetRegime]?.mean;
+    if (regimeBaseline == null || !isFinite(regimeBaseline)) return false;
+    const recent = this._targetRegimeCoherenceMeans.slice(-minAttempts);
+    const recentMean = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const sustainFloor = regimeBaseline + delta;
+    return recentMean < sustainFloor;
   }
 
   _buildProtocolCtx(V) {
@@ -714,6 +741,11 @@ export class PolicyEngine {
     this._tcsMaxInState = V ? V.tcs : 0;
     this._tcsHistory = [];
     this._entryVector = V ? { ...V } : null;
+    // Target-regime coherence peak + mean trackers (0-1 scale), reset each prescription.
+    const regimeKey = this._targetRegime ? this._targetRegime.toLowerCase() : null;
+    this._regimeCoherenceMaxInState = (V && regimeKey && isFinite(V[regimeKey])) ? V[regimeKey] : 0;
+    this._regimeCoherenceSumInState = 0;
+    this._regimeCoherenceCountInState = 0;
     // Fresh prescription: reset slope-veto budget (at most one veto per prescription).
     this._slopeVetoUsed = false;
     // Fresh prescription: next ENTRAIN is a base window, not an extension.
@@ -735,6 +767,17 @@ export class PolicyEngine {
     // Track TCS
     this._tcsHistory.push(V.tcs);
     if (V.tcs > this._tcsMaxInState) this._tcsMaxInState = V.tcs;
+
+    // Track target-regime coherence peak + running mean (for sustain-based escalation).
+    if (this._targetRegime) {
+      const key = this._targetRegime.toLowerCase();
+      const v = V[key];
+      if (isFinite(v)) {
+        if (v > this._regimeCoherenceMaxInState) this._regimeCoherenceMaxInState = v;
+        this._regimeCoherenceSumInState += v;
+        this._regimeCoherenceCountInState++;
+      }
+    }
 
     // v1.2: continuous drift monitoring — updateDrift called every second
     if (F) this._arousal.updateDrift(F, performance.now() / 1000);

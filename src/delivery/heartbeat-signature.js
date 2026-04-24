@@ -1,10 +1,17 @@
 // delivery/heartbeat-signature.js
 // The closing heartbeat end-signature from Doc 3 §2.7.
 //
-// Three cycles of LUB-dub, slowing and softening:
-//   Cycle 1: LUB (140ms) . dub (100ms) — interval ~0.9s, 100% amplitude
-//   Cycle 2: LUB . dub — interval ~1.1s, 75% amplitude
-//   Cycle 3: LUB . dub — interval ~1.4s, 50% amplitude → silence
+// Three cycles of LUB-dub, slowing and softening via π-based ratios:
+//   Cycle 1: LUB (140ms) . dub (100ms) — interval 1.000s      , amplitude 1.000
+//   Cycle 2: LUB . dub                  — interval π/e  ≈1.156s, amplitude 1/√π ≈0.564
+//   Cycle 3: LUB . dub                  — interval (π/e)² ≈1.337s, amplitude 1/π  ≈0.318 → silence
+//
+// The inter-cycle expansion factor is π/e — the natural transcendental
+// "slightly bigger than 1" constant, giving an organic slowdown. Amplitude
+// decays by 1/√π per step (half-steps of 1/π), a clean math-derived fade.
+// LUB-dub INTRA-cycle timing stays fixed — that's the physiological
+// fingerprint of a real heartbeat and changing it makes the signature feel
+// wrong.
 //
 // Delivered through the Woojer as a felt heartbeat in the chest.
 // The fundamental is 64 Hz / ~51 Hz (dub) — Woojer's strong haptic band.
@@ -14,6 +21,25 @@
 // smoothness (no click harmonics in the headphone passthrough). Requires
 // DeliveryCoordinator.playHeartbeat() to have faded the closing-frequency
 // carriers out first so the pulse plays against silence.
+
+// π-derived constants used throughout the signature.
+export const PI_OVER_E = Math.PI / Math.E;          // ≈1.1557
+export const ONE_OVER_SQRT_PI = 1 / Math.sqrt(Math.PI); // ≈0.5642
+export const ONE_OVER_PI = 1 / Math.PI;             // ≈0.3183
+
+/**
+ * Generate the three π-timed cycle specs (interval + amplitude).
+ * Exposed for tests and for anyone who wants to tune on top of it.
+ * @param {number} [baseInterval=1.0] base interval for cycle 1 in seconds
+ * @returns {Array<{interval:number, amplitude:number}>}
+ */
+export function piTimedCycles(baseInterval = 1.0) {
+  return [
+    { interval: baseInterval,                       amplitude: 1.0 },
+    { interval: baseInterval * PI_OVER_E,            amplitude: ONE_OVER_SQRT_PI },
+    { interval: baseInterval * PI_OVER_E * PI_OVER_E, amplitude: ONE_OVER_PI },
+  ];
+}
 
 /**
  * Play the heartbeat end-signature through the Woojer.
@@ -32,11 +58,14 @@
 export async function playHeartbeatSignature(ctx, destination, baseFreqHz = 64, strength = 1.0) {
   if (ctx.state === 'suspended') await ctx.resume();
 
-  const cycles = [
-    { lubDuration: 0.14, dubDuration: 0.10, dubDelay: 0.20, interval: 0.9, amplitude: 1.0 },
-    { lubDuration: 0.14, dubDuration: 0.10, dubDelay: 0.20, interval: 1.1, amplitude: 0.75 },
-    { lubDuration: 0.14, dubDuration: 0.10, dubDelay: 0.20, interval: 1.4, amplitude: 0.50 },
-  ];
+  const piCycles = piTimedCycles(1.0);
+  const cycles = piCycles.map(c => ({
+    lubDuration: 0.14,  // fixed — physiological LUB-dub fingerprint
+    dubDuration: 0.10,
+    dubDelay:    0.20,
+    interval:    c.interval,
+    amplitude:   c.amplitude,
+  }));
 
   let t = ctx.currentTime + 0.05; // small lead-in
 

@@ -3,6 +3,7 @@
   "use_targeted_selection": true,
   "regime_exhaustion_attempts": 3,
   "regime_exhaustion_peak_ratio": 0.55,
+  "regime_exhaustion_mean_delta": 0.10,
   "maintenance_completion_timeout_sec": 180,
   "baseline_duration_sec": 90,
   "baseline_min_sec": 60,
