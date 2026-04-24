@@ -38,8 +38,14 @@ export class SessionRecorder {
       startTime: null,
       endTime: null,
       softwareVersion: '1.0.0',
-      sensors: []
+      sensors: [],
+      baseline: null,
     };
+
+    // Current arrival-state phase/classification — written onto coherence
+    // samples so downstream tools can render baseline vs prescription windows.
+    this._currentPhase = 'idle';
+    this._currentClassification = null;
 
     // Downsampled counters (don't record every single EEG/PPG sample)
     this._eegCounter = 0;
@@ -132,7 +138,8 @@ export class SessionRecorder {
         plv: +((p.triunePLV || 0).toFixed(3)),
         harm: +((p.harmonicLock || 0).toFixed(3)),
         deficit: p.deficit,
-        lead: p.lead
+        lead: p.lead,
+        phase: this._currentPhase,
       });
     });
 
@@ -157,12 +164,35 @@ export class SessionRecorder {
     // State transitions: event-based
     this._sub('Aetheria_State', (p) => {
       if (p.type === 'state_transition') {
-        this._streams.state.push({
+        const rec = {
           t: this._relTime(p.timestamp),
           from: p.from,
           to: p.to,
-          reason: p.reason
-        });
+          reason: p.reason,
+        };
+        // Enriched selection-reason block (targeted-selection spec §3.4)
+        if (p.classification != null)           rec.classification = p.classification;
+        if (p.target_regime != null)            rec.target_regime = p.target_regime;
+        if (p.target_regime_rationale != null)  rec.target_regime_rationale = p.target_regime_rationale;
+        if (Array.isArray(p.candidate_pool))    rec.candidate_pool = p.candidate_pool;
+        if (p.selected != null)                 rec.selected = p.selected;
+        if (p.selection_rationale != null)      rec.selection_rationale = p.selection_rationale;
+        this._streams.state.push(rec);
+      }
+      if (p.type === 'phase') {
+        this._currentPhase = p.phase;
+        if (p.classification) this._currentClassification = p.classification;
+      }
+      if (p.type === 'baseline_classified') {
+        this._currentClassification = p.classification;
+        this._metadata.baseline = {
+          ...p.baseline,
+          start_t: 0,
+          end_t: p.baseline?.duration_s ?? null,
+        };
+      }
+      if (p.type === 'classification_shift') {
+        this._currentClassification = p.to;
       }
     });
 
@@ -173,7 +203,10 @@ export class SessionRecorder {
         action: p.action,
         freq: p.frequency?.frequency_hz,
         regime: p.frequency?.regime,
-        name: p.frequency?.name
+        name: p.frequency?.name,
+        rationale: p.rationale ?? null,
+        classification_at_fire: p.classification_at_fire ?? this._currentClassification,
+        baseline_ref: p.baseline_ref ?? null,
       });
     });
 

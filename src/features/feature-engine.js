@@ -111,6 +111,18 @@ export class FeatureEngine {
     console.log('FeatureEngine: IAF =', iaf);
   }
 
+  /** Reset per-session state so a new session starts with a clean slate. */
+  reset() {
+    this._rr = { values: [], timestamps: [] };
+    this._eeg = { TP9: [], AF7: [], AF8: [], TP10: [] };
+    this._ppg = [];
+    this._fnirsLatest = null;
+    this._baseline = null;
+    this._iaf = null;
+    this.latestFeatures = null;
+    console.log('FeatureEngine: reset for new session');
+  }
+
   _trimBuffer(buf, maxSec) {
     if (buf.timestamps.length === 0) return;
     const cutoff = buf.timestamps[buf.timestamps.length - 1] - maxSec;

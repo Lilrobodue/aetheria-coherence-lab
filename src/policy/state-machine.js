@@ -8,6 +8,9 @@ import { ArousalAnchor } from './arousal-anchor.js';
 import { CascadeCursor, selectFirstFrequency, selectNextFrequency, onDirectionFlip } from './selection-rules.js';
 import { evaluate } from './evaluate-rules.js';
 import { mean, std } from '../math/stats.js';
+import { classify, deficitRegime, CLASSIFICATIONS } from './baseline-classifier.js';
+import { summarizeBaseline, spinStrength } from './baseline-stats.js';
+import { runProtocol, resolveTargetRegime, selectCrossRegimeEscalation, selectClosingBridge } from './protocols.js';
 
 const STATES = ['STARTUP', 'BASELINE', 'ASSESS', 'PRESCRIBE', 'ENTRAIN', 'EVALUATE', 'CLOSING', 'COMPLETE', 'PAUSE', 'ABORT'];
 
@@ -68,12 +71,47 @@ export class PolicyEngine {
     this._hugPeakLostSince = null;
     this._latestCoherence = null;
     this._latestFeatures = null;
+
+    // Baseline classifier layer (spec: coherence_lab_baseline_spec.md §3).
+    // Raw windowed samples used to build baseline stats + the classifier input.
+    this._baselineCoherenceSamples = [];
+    this._baselineBcsSamples = [];
+    this._baselineExtensionsUsed = 0;
+    // Session-relative seconds at which the baseline phase ended and the
+    // prescription phase began. Used by maintenance's completion timer.
+    this._baselineEndTime = null;
+    this._baselineStats = null;         // full summarizeBaseline() output
+    this._classification = null;         // current arrival-state label
+    this._lastRebaselineAt = 0;          // session-relative seconds
+    this._phase = 'idle';                // 'idle' | 'baseline' | 'prescription' | 'quick_rebaseline'
+    this._rollingGutSamples = [];        // {t, gut} — trimmed to 30s for foundation gating
+    // Spin tracking post-baseline (used by maintenance protocol).
+    this._spinCurrent = 0;
+    this._spinPeakSinceBaseline = 0;
+    this._spinDeclineSince = null;
+    // First prescription has not fired yet — UI uses this for banner + chip.
+    this._firstPrescriptionFired = false;
+
+    // Regime-targeted selection (targeted-selection spec §3).
+    // Target regime is resolved at first prescription (from baseline
+    // deficit_majority) and held across prescriptions until the engine
+    // determines the regime is exhausted and escalates.
+    this._targetRegime = null;
+    this._targetRegimeAttempts = 0;   // distinct frequencies tried in current regime
+    this._targetRegimePeaks = [];     // TCS peak achieved per target-regime prescription
+    this._targetRegimeFreqs = new Set(); // frequency_hz values played while in this regime
+    this._regimeHistory = [];         // [{regime, attempts, peaks, escalated:boolean, at:t}]
+    // Last enriched reason block — attached to the next ASSESS→PRESCRIBE transition.
+    this._lastSelectionLog = null;
   }
 
   get state() { return this._state; }
   get currentFrequency() { return this._currentFrequency; }
   get cascadeDirection() { return this._arousal.direction; }
   get arousalAnchor() { return this._arousal.anchor; }
+  get phase() { return this._phase; }
+  get classification() { return this._classification; }
+  get baselineStats() { return this._baselineStats; }
   get sessionDuration() {
     return this._sessionStart ? (performance.now() / 1000 - this._sessionStart) : 0;
   }
@@ -89,9 +127,25 @@ export class PolicyEngine {
     this._unsubscribers.push(
       this.bus.subscribe('Aetheria_Coherence', (p) => {
         this._latestCoherence = p;
+        const t = this.sessionDuration;
         if (p && p.tcs != null && isFinite(p.tcs)) {
-          this._tcsSamples.push({ t: this.sessionDuration, tcs: p.tcs });
+          this._tcsSamples.push({ t, tcs: p.tcs });
           if (this._tcsSamples.length > 120) this._tcsSamples.shift();
+        }
+        if (p && this._phase === 'baseline') {
+          this._baselineCoherenceSamples.push({
+            t,
+            gut: p.gut, heart: p.heart, head: p.head,
+            harm: p.harmonicLock ?? null,
+            triunePLV: p.triunePLV ?? null,
+            deficit: p.deficit ?? null, // needed for baseline.deficit_majority vote (targeted-selection spec §3.1)
+          });
+        }
+        if (p && p.gut != null && isFinite(p.gut)) {
+          this._rollingGutSamples.push({ t, gut: p.gut });
+          while (this._rollingGutSamples.length && t - this._rollingGutSamples[0].t > 30) {
+            this._rollingGutSamples.shift();
+          }
         }
       }),
       this.bus.subscribe('Aetheria_Features', (p) => {
@@ -99,12 +153,36 @@ export class PolicyEngine {
       }),
       // Calibrated 2026-04-17: buffer BCS samples for CLOSE_ON_UNIFIED_COHERENCE.
       this.bus.subscribe('Aetheria_BCS', (p) => {
+        const t = this.sessionDuration;
         this._bcsSamples.push({
-          t: this.sessionDuration,
+          t,
           bcs: p.bcs,
           bcsQuality: p.bcsQuality || null
         });
         if (this._bcsSamples.length > 30) this._bcsSamples.shift();
+        if (this._phase === 'baseline') {
+          this._baselineBcsSamples.push({ t, kuramoto: p.kuramoto ?? null, bcs: p.bcs, bcsQuality: p.bcsQuality });
+        }
+        // Track spin_strength for post-baseline maintenance protocol.
+        if (this._phase !== 'baseline' && this._latestFeatures) {
+          const f = this._latestFeatures;
+          const s = spinStrength({
+            hrvCoherence: f.heart?.hrvCoherence,
+            rmssd: f.heart?.rmssd,
+            kuramoto: p.kuramoto,
+          });
+          this._spinCurrent = s;
+          if (s >= this._spinPeakSinceBaseline) {
+            this._spinPeakSinceBaseline = s;
+            this._spinDeclineSince = null;
+          } else if (this._spinDeclineSince == null) {
+            this._spinDeclineSince = t;
+          }
+        }
+        // Phase-transition event triggers an immediate quick re-baseline.
+        if (p.phaseTransition?.detected && this._phase === 'prescription') {
+          this._requestQuickRebaseline('phase transition detected');
+        }
       })
     );
 
@@ -130,16 +208,30 @@ export class PolicyEngine {
     this._state = newState;
     this._stateStart = performance.now() / 1000;
 
-    const msg = prev ? `${prev} → ${newState}: ${reason}` : `${newState}: ${reason}`;
+    // Reason is either a string or an enriched object (from _applyPick).
+    // When an object, the human-readable line is `reason.reason`.
+    const isObj = reason && typeof reason === 'object';
+    const reasonStr = isObj ? reason.reason : reason;
+    const msg = prev ? `${prev} → ${newState}: ${reasonStr}` : `${newState}: ${reasonStr}`;
     console.log('Policy:', msg);
 
-    this.bus.publish('Aetheria_State', {
+    const payload = {
       type: 'state_transition',
       from: prev,
       to: newState,
-      reason,
-      message: msg
-    });
+      reason: reasonStr,
+      message: msg,
+    };
+    if (isObj) {
+      payload.classification = reason.classification ?? null;
+      payload.target_regime = reason.target_regime ?? null;
+      payload.target_regime_rationale = reason.target_regime_rationale ?? null;
+      payload.candidate_pool = reason.candidate_pool ?? [];
+      payload.selected = reason.selected ?? null;
+      payload.selection_rationale = reason.selection_rationale ?? null;
+      payload.source = reason.source ?? null;
+    }
+    this.bus.publish('Aetheria_State', payload);
   }
 
   _tick() {
@@ -179,8 +271,81 @@ export class PolicyEngine {
       cascade: this._arousal.direction,
       anchor: this._arousal.anchor,
       sessionTime: this.sessionDuration,
-      stateTime: this.stateDuration
+      stateTime: this.stateDuration,
+      phase: this._phase,
+      classification: this._classification,
     });
+
+    // Periodic quick re-baseline during an active session (spec §3.5).
+    if (this._phase === 'prescription') {
+      const cadence = this.config.rebaseline_interval_sec ?? 300;
+      if (this.sessionDuration - this._lastRebaselineAt >= cadence) {
+        this._requestQuickRebaseline('periodic cadence');
+      }
+    }
+  }
+
+  _publishPhase() {
+    this.bus.publish('Aetheria_State', {
+      type: 'phase',
+      phase: this._phase,
+      classification: this._classification || null,
+    });
+  }
+
+  // Quick re-baseline: samples a 30s window *without* pausing prescription,
+  // then re-classifies. Classification may change mid-session (spec §3.5).
+  _requestQuickRebaseline(reason) {
+    if (this._quickRebaselineInFlight) return;
+    this._quickRebaselineInFlight = true;
+    this._lastRebaselineAt = this.sessionDuration;
+    const window = this.config.rebaseline_quick_duration_sec ?? 30;
+    const startT = this.sessionDuration;
+    const prevPhase = this._phase;
+    this._phase = 'quick_rebaseline';
+    this._publishPhase();
+    console.log(`Policy: quick re-baseline (${window}s) — ${reason}`);
+
+    setTimeout(() => {
+      const endT = this.sessionDuration;
+      // Build a stats object from the most recent window of coherence samples
+      // we already have buffered on the engine.
+      const window30 = this._baselineCoherenceSamples; // this buffer only fills during 'baseline'
+      // For quick re-baseline we draw from the rolling buffers on live streams:
+      const coh = [];
+      // Use last `window` seconds of rollingGutSamples + _latestCoherence snapshots —
+      // simpler: accumulate a transient buffer over the window.
+      // (We scan the tcs buffer; it's sampled 1 Hz with full coherence fields absent,
+      //  so for the classifier we fall back to the last snapshot + variance from rolling GUT.)
+      const rolling = this._rollingGutSamples.filter(s => s.t >= startT && s.t <= endT);
+      const meanGut = rolling.length ? rolling.reduce((a,s)=>a+s.gut,0)/rolling.length : null;
+      // Re-classify only if we have enough data; otherwise keep prior label.
+      if (rolling.length >= 10 && this._baselineStats) {
+        const prev = this._classification;
+        // Lightweight re-classification: replace GUT stats with this window's rolling values,
+        // keep HEART/HEAD baseline as reference (they're slower-moving).
+        const updated = {
+          ...this._baselineStats,
+          GUT: {
+            mean: +meanGut.toFixed(3),
+            sd: +Math.sqrt(rolling.reduce((a,s)=>a+(s.gut-meanGut)**2,0)/rolling.length).toFixed(3),
+          },
+        };
+        const newClass = classify(updated, this.config.classifier);
+        if (newClass !== prev) {
+          console.log(`Policy: classification shifted ${prev} → ${newClass} after quick re-baseline`);
+          this._classification = newClass;
+          this.bus.publish('Aetheria_State', {
+            type: 'classification_shift',
+            from: prev, to: newClass,
+            updated_baseline_GUT: updated.GUT,
+          });
+        }
+      }
+      this._phase = prevPhase;
+      this._publishPhase();
+      this._quickRebaselineInFlight = false;
+    }, (this.config.rebaseline_quick_duration_sec ?? 30) * 1000);
   }
 
   // --- State handlers ---
@@ -188,12 +353,19 @@ export class PolicyEngine {
   _tickStartup() {
     // Check if sensors are streaming (we have coherence data)
     if (this._latestCoherence) {
-      this._transition('BASELINE', 'Sensors active, capturing baseline (90s)');
+      const target = this.config.baseline_duration_sec || 90;
+      this._phase = 'baseline';
+      this._publishPhase();
+      this._transition('BASELINE', `Sensors active, capturing baseline (${target}s)`);
     }
   }
 
   _tickBaseline(V, features, duration) {
-    const baselineDuration = this.config.baseline_duration_sec || 90;
+    const target = this.config.baseline_duration_sec || 90;
+    const minDur = this.config.baseline_min_sec ?? 60;
+    const maxDur = this.config.baseline_max_sec ?? 120;
+    const extSec = this.config.baseline_extension_sec ?? 30;
+    const maxExt = this.config.baseline_max_extensions ?? 2;
 
     // Collect features during baseline
     if (features) {
@@ -204,10 +376,30 @@ export class PolicyEngine {
       this._baselineTcsSamples.push(V.tcs);
     }
 
-    if (duration >= baselineDuration && this._baselineFeatures.length >= 10) {
-      // Compute baseline calibration
+    const reachedTarget = duration >= (target + this._baselineExtensionsUsed * extSec);
+    const hardCap = duration >= maxDur;
+
+    if ((reachedTarget || hardCap) && this._baselineFeatures.length >= 10) {
       this._calibrateBaseline();
-      this._transition('ASSESS', `Baseline captured (${this._baselineFeatures.length} samples, ${baselineDuration}s)`);
+
+      if (this._classification === CLASSIFICATIONS.UNSTABLE &&
+          this._baselineExtensionsUsed < maxExt && !hardCap) {
+        this._baselineExtensionsUsed++;
+        this._transition('BASELINE',
+          `Baseline unstable (ext ${this._baselineExtensionsUsed}/${maxExt}) — extending ${extSec}s`);
+        this.bus.publish('Aetheria_State', {
+          type: 'baseline_extended',
+          extension: this._baselineExtensionsUsed,
+          reason: 'high regime variance',
+        });
+        return;
+      }
+
+      this._phase = 'prescription';
+      this._baselineEndTime = this.sessionDuration;
+      this._publishPhase();
+      this._transition('ASSESS',
+        `Baseline captured (${this._baselineFeatures.length} samples, ${duration.toFixed(0)}s, ${this._classification || 'unknown'})`);
     }
   }
 
@@ -276,40 +468,245 @@ export class PolicyEngine {
     const lastFeatures = this._baselineFeatures[this._baselineFeatures.length - 1];
     const { initialDirection } = this._arousal.setAnchor(lastFeatures);
     this._cursor.reset(initialDirection);
+
+    // Per-regime stats + spin_strength + classification (spec §3.1, §3.2).
+    const baselineStats = summarizeBaseline(
+      this._baselineCoherenceSamples,
+      this._baselineFeatures.map(f => ({
+        t: f.timestamp != null ? (f.timestamp - this._sessionStart) : null,
+        heart: f.heart, gut: f.gut, head: f.head, resp: f.respiration,
+      })),
+      this._baselineBcsSamples,
+      { durationSec: this.stateDuration }
+    );
+    const classification = classify(baselineStats, this.config.classifier);
+    baselineStats.classification = classification;
+    this._baselineStats = baselineStats;
+    this._classification = classification;
+    // Seed the post-baseline spin tracker with the baseline peak so the
+    // maintenance protocol can observe the natural decline.
+    this._spinPeakSinceBaseline = baselineStats.spin_strength_peak || 0;
+    this._spinCurrent = this._spinPeakSinceBaseline;
+    this._spinDeclineSince = null;
+
+    console.log(
+      `Policy: classified '${classification}' — ` +
+      `GUT=${baselineStats.GUT.mean}±${baselineStats.GUT.sd}, ` +
+      `HEART=${baselineStats.HEART.mean}±${baselineStats.HEART.sd}, ` +
+      `HEAD=${baselineStats.HEAD.mean}±${baselineStats.HEAD.sd}, ` +
+      `spin_peak=${baselineStats.spin_strength_peak}`
+    );
+
+    this.bus.publish('Aetheria_State', {
+      type: 'baseline_classified',
+      classification,
+      baseline: baselineStats,
+    });
   }
 
   _tickAssess(V) {
     if (!V) return;
 
-    let freq;
-    if (this._frequencyHistory.length === 0) {
-      // First selection after baseline — uses cursor
-      freq = selectFirstFrequency(V, this.library, this._cursor);
+    let pick = null;
+
+    const useBaseline = this.config.use_baseline !== false;
+    const useTargeted = this.config.use_targeted_selection !== false;
+
+    // Record the peak from the just-completed prescription (if any) against
+    // the target regime so exhaustion can be judged.
+    this._recordPriorRegimePeak();
+
+    // Cross-regime escalation check BEFORE we re-enter the protocol:
+    // if the target regime has had ≥N attempts and no peak meets the ratio,
+    // escalate. For HEAD, a null return from escalation means "go to CLOSING".
+    if (useTargeted && useBaseline && this._classification && this._targetRegime && this._shouldEscalateRegime()) {
+      const fromRegime = this._targetRegime;
+      const ctx = this._buildProtocolCtx(V);
+      const escalation = selectCrossRegimeEscalation(fromRegime, ctx);
+      this._regimeHistory.push({
+        regime: fromRegime,
+        attempts: this._targetRegimeAttempts,
+        peaks: [...this._targetRegimePeaks],
+        escalated: true,
+        at: this.sessionDuration,
+      });
+      if (!escalation) {
+        // HEAD exhausted with no viable next step — enter CLOSING directly.
+        this._enterClosing(`${fromRegime} exhausted after ${this._targetRegimeAttempts} attempts (peaks: ${this._targetRegimePeaks.map(p => p.toFixed(0)).join(', ')})`);
+        return;
+      }
+      // Advance target to the next regime; bridge tones keep from=target so
+      // the bridge itself counts as "finishing" the prior regime.
+      if (escalation.next_regime) {
+        this._targetRegime = fromRegime; // bridge plays as the last tone of fromRegime
+      } else {
+        this._switchTargetRegime(escalation.target_regime);
+      }
+      this._applyPick(escalation, 'escalation');
+      return;
+    }
+
+    const ctx = useBaseline && this._classification ? this._buildProtocolCtx(V) : null;
+    if (ctx && useTargeted) {
+      pick = runProtocol(ctx);
+      if (!pick) {
+        // Maintenance declined — let the user's own regulation continue.
+        // Stay in ASSESS; the tick loop will retry next second.
+        return;
+      }
+    } else if (ctx && !useTargeted) {
+      // Baseline gating on, targeted selection off — protocol runs but
+      // without regime caching (legacy behavior of yesterday's build).
+      pick = runProtocol({ ...ctx, targetRegime: undefined });
+      if (!pick) return;
+    } else if (this._frequencyHistory.length === 0) {
+      const freq = selectFirstFrequency(V, this.library, this._cursor);
+      pick = {
+        freq,
+        rationale: 'deficit',
+        target_regime: freq.regime,
+        target_regime_rationale: 'legacy cascade (use_baseline=false)',
+        candidate_pool: [freq.frequency_hz],
+        selection_rationale: 'legacy engine first-prescription',
+      };
     } else {
-      // Subsequent selection from EVALUATE hint — cursor advances
       const hint = this._lastHint || 'ADVANCE';
-      freq = selectNextFrequency(
+      const freq = selectNextFrequency(
         hint, this._currentFrequency, V,
         this.library, this._frequencyHistory, this._cursor
       );
+      pick = {
+        freq,
+        rationale: hint === 'PIVOT' ? 'deficit' : 'closing',
+        target_regime: freq.regime,
+        target_regime_rationale: 'legacy cascade',
+        candidate_pool: [freq.frequency_hz],
+        selection_rationale: `legacy engine ${hint}`,
+      };
     }
 
-    this._currentFrequency = freq;
-    this._frequencyHistory.push(freq);
+    // Set target regime on first prescription, or when a protocol indicates it.
+    if (useTargeted && !this._targetRegime && pick.target_regime) {
+      this._switchTargetRegime(pick.target_regime);
+    }
+    // Track that this frequency was played in the current target regime.
+    if (this._targetRegime && pick.freq.regime === this._targetRegime) {
+      this._targetRegimeFreqs.add(pick.freq.frequency_hz);
+      this._targetRegimeAttempts = this._targetRegimeFreqs.size;
+    }
 
-    this._transition('PRESCRIBE',
-      `Selected ${freq.frequency_hz} Hz (${freq.regime} · ${freq.name} · ⌬${freq.digital_root}), cascade ${this._cursor.direction}`);
+    this._applyPick(pick, 'protocol');
+  }
+
+  _applyPick(pick, source) {
+    this._currentFrequency = pick.freq;
+    this._currentRationale = pick.rationale;
+    this._frequencyHistory.push(pick.freq);
+
+    const reasonObj = {
+      reason: `Selected ${pick.freq.frequency_hz} Hz (${pick.freq.regime} · ${pick.freq.name} · ⌬${pick.freq.digital_root}) — ${pick.rationale}`,
+      classification: this._classification || null,
+      target_regime: pick.target_regime || null,
+      target_regime_rationale: pick.target_regime_rationale || null,
+      candidate_pool: pick.candidate_pool || [],
+      selected: pick.freq.frequency_hz,
+      selection_rationale: pick.selection_rationale || null,
+      source,
+    };
+    this._lastSelectionLog = reasonObj;
+
+    this._transition('PRESCRIBE', reasonObj);
+  }
+
+  _switchTargetRegime(newRegime) {
+    if (this._targetRegime && this._targetRegime !== newRegime) {
+      // Close out the prior regime in the history if not already.
+      const last = this._regimeHistory[this._regimeHistory.length - 1];
+      if (!last || last.regime !== this._targetRegime || !last.escalated) {
+        this._regimeHistory.push({
+          regime: this._targetRegime,
+          attempts: this._targetRegimeAttempts,
+          peaks: [...this._targetRegimePeaks],
+          escalated: true,
+          at: this.sessionDuration,
+        });
+      }
+    }
+    this._targetRegime = newRegime;
+    this._targetRegimeAttempts = 0;
+    this._targetRegimePeaks = [];
+    this._targetRegimeFreqs = new Set();
+  }
+
+  _recordPriorRegimePeak() {
+    if (this._targetRegime && this._currentFrequency &&
+        this._currentFrequency.regime === this._targetRegime &&
+        isFinite(this._tcsMaxInState) && this._tcsMaxInState > 0) {
+      this._targetRegimePeaks.push(this._tcsMaxInState);
+    }
+  }
+
+  _shouldEscalateRegime() {
+    const minAttempts = this.config.regime_exhaustion_attempts ?? 3;
+    const ratio = this.config.regime_exhaustion_peak_ratio ?? 0.55;
+    if (this._targetRegimeAttempts < minAttempts) return false;
+    if (this._targetRegimePeaks.length < minAttempts) return false;
+    // Target regime's baseline mean * 100 gives a TCS-comparable scale only
+    // loosely; instead compare to baseline TCS mean (session-relative) or a
+    // configured TCS-peak floor. We use baseline_tcs_mean * ratio as the bar
+    // — a "meaningful" peak is at least this fraction of baseline TCS.
+    const baselineTcs = this._baselineTcsMean ?? 50;
+    const peakFloor = ratio * baselineTcs * (100 / 100); // kept explicit for clarity
+    const bestPeak = Math.max(...this._targetRegimePeaks);
+    return bestPeak < peakFloor;
+  }
+
+  _buildProtocolCtx(V) {
+    const rolling = this._rollingGutSamples;
+    const gutRollingMean = rolling.length
+      ? rolling.reduce((a, s) => a + s.gut, 0) / rolling.length
+      : (V.gut || 0);
+    return {
+      classification: this._classification,
+      baseline: this._baselineStats,
+      coherence: V,
+      history: this._frequencyHistory,
+      library: this.library,
+      spin: {
+        current: this._spinCurrent,
+        peakSinceBaseline: this._spinPeakSinceBaseline,
+        declining: this._spinDeclineSince != null &&
+                   (this.sessionDuration - this._spinDeclineSince) >= 10 &&
+                   this._spinCurrent < 0.7 * this._spinPeakSinceBaseline,
+      },
+      gutRolling: { mean: gutRollingMean, n: rolling.length },
+      targetRegime: this._targetRegime,
+      targetRegimePeaks: this._targetRegimePeaks,
+      timeSinceBaseline: this._baselineEndTime != null
+        ? this.sessionDuration - this._baselineEndTime
+        : 0,
+      maintenanceCompletionTimeoutSec: this.config.maintenance_completion_timeout_sec ?? 180,
+    };
   }
 
   _tickPrescribe(V) {
     // Fire the prescription to the delivery coordinator
     const freq = this._currentFrequency;
     if (freq) {
+      const baseline = this._baselineStats;
       this.bus.publish('Aetheria_Prescription', {
         action: 'play',
         frequency: freq,
-        crossfade_sec: this.config.crossfade_duration_sec || 4
+        crossfade_sec: this.config.crossfade_duration_sec || 4,
+        rationale: this._currentRationale || 'deficit',
+        classification_at_fire: this._classification || null,
+        baseline_ref: baseline ? {
+          GUT_mean:   baseline.GUT?.mean   ?? null,
+          HEART_mean: baseline.HEART?.mean ?? null,
+          HEAD_mean:  baseline.HEAD?.mean  ?? null,
+        } : null,
       });
+      this._firstPrescriptionFired = true;
     }
 
     // Initialize ENTRAIN tracking
@@ -684,27 +1081,47 @@ export class PolicyEngine {
     }
     console.log(`Policy: trajectory at close — TCS slope ${fmt(tcsTraj.slope)}/60s (n=${tcsTraj.n}), BCS slope ${fmt(bcsTraj.slope)}/60s (n=${bcsTraj.n}). Verdict: ${verdict}.`);
 
-    // Select closing frequency: leading regime, digital root 9, deepest octave
+    // Closing selection: targeted-selection spec §4.5 chooses by whether the
+    // targeted deficit was engaged and improved. Fallback = lead-regime root-9.
     const V = this._latestCoherence;
-    const leadRegime = V?.lead || 'HEART';
-    const closingFreqs = this.library
-      .filter(f => f.regime === leadRegime && f.digital_root === 9)
-      .sort((a, b) => a.frequency_hz - b.frequency_hz);
-
-    const closingFreq = closingFreqs[0] || this._currentFrequency;
+    const useTargeted = this.config.use_targeted_selection !== false;
+    let closingFreq = null;
+    if (useTargeted && this._targetRegime && this._baselineStats) {
+      closingFreq = selectClosingBridge({
+        library: this.library,
+        baseline: this._baselineStats,
+        liveCoherence: V,
+        targetRegime: this._targetRegime,
+        history: this._frequencyHistory,
+      });
+    }
+    if (!closingFreq) {
+      const leadRegime = V?.lead || 'HEART';
+      const closingFreqs = this.library
+        .filter(f => f.regime === leadRegime && f.digital_root === 9)
+        .sort((a, b) => a.frequency_hz - b.frequency_hz);
+      closingFreq = closingFreqs[0] || this._currentFrequency;
+    }
     this._currentFrequency = closingFreq;
 
     // Play closing frequency
     this.bus.publish('Aetheria_Prescription', {
       action: 'play',
       frequency: closingFreq,
-      crossfade_sec: 4
+      crossfade_sec: 4,
+      rationale: 'closing',
+      classification_at_fire: this._classification,
+      baseline_ref: this._baselineStats ? {
+        GUT_mean:   this._baselineStats.GUT?.mean   ?? null,
+        HEART_mean: this._baselineStats.HEART?.mean ?? null,
+        HEAD_mean:  this._baselineStats.HEAD?.mean  ?? null,
+      } : null,
     });
 
     this._hugPeakTcs = V?.tcs || 0;
     this._hugPeakLostSince = null;
 
-    this._transition('CLOSING', `${reason}. Closing with ${closingFreq.frequency_hz} Hz (${leadRegime} · ${closingFreq.name})`);
+    this._transition('CLOSING', `${reason}. Closing with ${closingFreq.frequency_hz} Hz (${closingFreq.regime} · ${closingFreq.name})`);
   }
 
   _finish() {

@@ -111,13 +111,23 @@ export class MuseAthena {
       }
       batch[channelName] = values;
 
-      // Update contact quality using batch RMS (phase-independent)
+      // Update contact quality using AC RMS (mean-subtracted, phase-independent).
+      // Muse Athena raw samples carry a ~700+ µV DC offset; raw RMS would
+      // always fail the <200 µV physiological check and force quality to 0
+      // even on a clean signal (observed in session Joe-new-aetheria-session-2,
+      // 2026-04-24: blinks registering while quality stuck at 0%).
+      let sum = 0;
+      for (let s = 0; s < nSamples; s++) sum += values[s];
+      const mean = sum / nSamples;
       let sumSq = 0;
-      for (let s = 0; s < nSamples; s++) sumSq += values[s] * values[s];
-      const rms = Math.sqrt(sumSq / nSamples);
-      // Good contact: RMS in physiological EEG range (1–200 µV)
+      for (let s = 0; s < nSamples; s++) {
+        const d = values[s] - mean;
+        sumSq += d * d;
+      }
+      const acRms = Math.sqrt(sumSq / nSamples);
+      // Good contact: AC RMS in physiological EEG range (1–200 µV)
       // Below 1 µV = no signal / rail; above 200 µV = movement artifact
-      const good = rms > 1 && rms < 200;
+      const good = acRms > 1 && acRms < 200;
       const prev = this._channelQuality[channelName];
       // Asymmetric smoothing: rise fast (~1s to 50%), fall slow (~3.5s to half)
       this._channelQuality[channelName] = good

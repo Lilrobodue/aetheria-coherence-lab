@@ -62,6 +62,13 @@ export class ZScorer {
     return isFinite(z) ? Math.max(-4, Math.min(4, z)) : 0;
   }
 
+  /** Forget any prior calibration so the next calibrate() call rebuilds from scratch. */
+  reset() {
+    this._mean = 0;
+    this._std = 1;
+    this._calibrated = false;
+  }
+
   get calibrated() { return this._calibrated; }
   get baselineMean() { return this._mean; }
   get baselineStd() { return this._std; }

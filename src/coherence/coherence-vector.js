@@ -58,6 +58,21 @@ export class CoherenceEngine {
     console.log('CoherenceEngine: baseline calibrated');
   }
 
+  /**
+   * Reset calibration + envelope histories for a new session. Prevents the
+   * prior session's baseline from distorting the new session's pre-calibration
+   * scores (see regime-scoring.js RegimeScorer.reset docstring).
+   */
+  reset() {
+    this._scorer.reset();
+    this._heartEnvHistory = { values: [], timestamps: [] };
+    this._gutEnvHistory = { values: [], timestamps: [] };
+    this._headEnvHistory = { values: [], timestamps: [] };
+    this._latestFeatures = null;
+    this.latest = null;
+    console.log('CoherenceEngine: reset for new session');
+  }
+
   _updateEnvelopeHistory(features) {
     const t = features.timestamp || performance.now() / 1000;
 

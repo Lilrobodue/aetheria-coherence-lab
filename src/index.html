@@ -170,6 +170,84 @@
 
     .hidden { display: none !important; }
 
+    /* Baseline banner (spec §5): visible only during the baseline window. */
+    .baseline-banner {
+      display: none;
+      background: linear-gradient(90deg, rgba(124,77,255,0.12), rgba(124,77,255,0.04));
+      border-bottom: 1px solid rgba(124,77,255,0.3);
+      color: var(--text-primary);
+      padding: 10px 16px;
+      font-size: 12px;
+      letter-spacing: 0.5px;
+      align-items: center;
+      gap: 16px;
+    }
+    .baseline-banner.visible { display: flex; }
+    .baseline-banner .bb-label { color: var(--accent); font-weight: bold; letter-spacing: 1.5px; text-transform: uppercase; font-size: 10px; }
+    .baseline-banner .bb-msg { flex: 1; color: var(--text-secondary); }
+    .baseline-banner .bb-countdown { font-variant-numeric: tabular-nums; font-weight: bold; color: var(--accent); }
+    .baseline-banner .bb-sq { display: flex; gap: 6px; align-items: center; font-size: 10px; color: var(--text-dim); }
+    .sq-pip {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim); border: 1px solid rgba(255,255,255,0.15);
+    }
+    .sq-pip.sq-good { background: var(--success); }
+    .sq-pip.sq-fair { background: var(--warning); }
+    .sq-pip.sq-poor { background: var(--error); }
+
+    /* Arrival-state chip (persistent, after classification). */
+    .arrival-chip {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 10px;
+      border-radius: 12px;
+      background: rgba(124,77,255,0.15);
+      border: 1px solid rgba(124,77,255,0.35);
+      font-size: 10px;
+      color: var(--text-primary);
+      letter-spacing: 0.5px;
+    }
+    .arrival-chip.visible { display: inline-flex; }
+    .arrival-chip .ac-label { color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.2px; }
+    .arrival-chip .ac-value { font-weight: bold; color: var(--accent); }
+    .arrival-chip.c-regulated_active { background: rgba(0,230,118,0.12); border-color: rgba(0,230,118,0.35); }
+    .arrival-chip.c-regulated_active .ac-value { color: var(--success); }
+    .arrival-chip.c-regulated_stable { background: rgba(66,165,245,0.12); border-color: rgba(66,165,245,0.35); }
+    .arrival-chip.c-regulated_stable .ac-value { color: var(--head-color); }
+    .arrival-chip.c-dysregulated { background: rgba(255,193,7,0.10); border-color: rgba(255,193,7,0.35); }
+    .arrival-chip.c-dysregulated .ac-value { color: var(--warning); }
+    .arrival-chip.c-mixed { background: rgba(255,152,0,0.10); border-color: rgba(255,152,0,0.35); }
+    .arrival-chip.c-mixed .ac-value { color: var(--gut-color); }
+    .arrival-chip.c-unstable { background: rgba(255,82,82,0.10); border-color: rgba(255,82,82,0.35); }
+    .arrival-chip.c-unstable .ac-value { color: var(--error); }
+
+    /* Live coherence-vs-baseline indicator. */
+    .cvb-indicator {
+      display: none; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 10px; font-size: 10px;
+      background: rgba(255,255,255,0.04);
+    }
+    .cvb-indicator.visible { display: inline-flex; }
+    .cvb-indicator .cvb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+    .cvb-indicator.cvb-green .cvb-dot { background: var(--success); }
+    .cvb-indicator.cvb-amber .cvb-dot { background: var(--warning); }
+    .cvb-indicator.cvb-red   .cvb-dot { background: var(--error); animation: pulse 1s infinite; }
+    .cvb-indicator .cvb-label { color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.2px; }
+
+    /* Arrival-state summary modal */
+    .arrival-summary .modal-content { max-width: 520px; padding: 32px 28px; }
+    .arrival-summary h1 { margin-bottom: 16px; }
+    .arrival-summary .as-tagline { font-size: 14px; color: var(--text-primary); margin-bottom: 10px; text-align: center; }
+    .arrival-summary .as-protocol { font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; text-align: center; }
+    .arrival-summary .as-actions { display: flex; gap: 12px; justify-content: center; }
+    .arrival-summary .btn-accept { border-color: var(--success); color: var(--success); }
+    .arrival-summary select.override-select {
+      background: var(--bg-panel); color: var(--text-primary);
+      border: 1px solid var(--border); border-radius: 3px;
+      padding: 6px 10px; font-family: inherit; font-size: 12px;
+    }
+
     /* Session Complete Modal */
     .session-complete-actions {
       display: flex; flex-direction: column; gap: 12px; margin-top: 24px;
@@ -853,6 +931,18 @@
 
   <div id="ble-warning" class="ble-warning">Web Bluetooth not available. Use Chrome or Edge.</div>
 
+  <!-- Baseline capture banner (spec §5) -->
+  <div id="baseline-banner" class="baseline-banner">
+    <span class="bb-label">Baseline</span>
+    <span class="bb-msg">Sit quietly — capturing your arriving state. No audio will play yet.</span>
+    <span class="bb-sq" title="Per-regime signal quality">
+      <span class="sq-pip" id="sq-pip-gut"   title="GUT"></span>
+      <span class="sq-pip" id="sq-pip-heart" title="HEART"></span>
+      <span class="sq-pip" id="sq-pip-head"  title="HEAD"></span>
+    </span>
+    <span class="bb-countdown"><span id="bb-countdown-value">90</span>s remaining</span>
+  </div>
+
   <!-- Combined info bar -->
   <div class="info-bar">
     <div id="status-polar-h10" class="sensor-status">
@@ -871,6 +961,33 @@
     <span class="session-item"><span class="label">In state:</span> <span class="value" id="state-time">00:00</span></span>
     <span id="current-frequency" style="display:none"></span>
     <span id="cascade-info" style="display:none"></span>
+    <span id="arrival-chip" class="arrival-chip">
+      <span class="ac-label">Arrival</span>
+      <span class="ac-value" id="arrival-chip-value">--</span>
+    </span>
+    <span id="cvb-indicator" class="cvb-indicator" title="Live coherence vs baseline">
+      <span class="cvb-dot"></span>
+      <span class="cvb-label" id="cvb-label">CvB</span>
+    </span>
+  </div>
+
+  <!-- Arrival-state summary modal (shows once after baseline classifies) -->
+  <div id="arrival-summary-modal" class="modal-overlay arrival-summary hidden">
+    <div class="modal-content">
+      <h1>Arrival State</h1>
+      <div class="as-tagline" id="as-tagline">--</div>
+      <div class="as-protocol" id="as-protocol">--</div>
+      <div class="as-actions">
+        <button id="btn-arrival-accept" class="btn btn-accept">Accept</button>
+        <select id="override-select" class="override-select">
+          <option value="">Override protocol…</option>
+          <option value="regulated_active">Maintenance (regulated_active)</option>
+          <option value="regulated_stable">Reinforcement (regulated_stable)</option>
+          <option value="mixed">Deficit work (mixed)</option>
+          <option value="dysregulated">Foundation (dysregulated)</option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <!-- Main content -->

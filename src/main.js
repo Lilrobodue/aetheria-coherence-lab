@@ -144,7 +144,32 @@ async function init() {
           `${s.cascade} (${(s.anchor || 0).toFixed(2)})`;
         document.getElementById('cascade-info').style.display = '';
       }
+      updateBaselineBanner(s);
     }
+    if (p.type === 'phase') {
+      app._currentPhase = p.phase;
+      updateBaselineBannerPhase(p.phase);
+    }
+    if (p.type === 'baseline_classified') {
+      app._baselineStats = p.baseline;
+      app._classification = p.classification;
+      showArrivalChip(p.classification);
+      showArrivalSummary(p.classification);
+      app.dashboard.addLogEntry(`Arrival state classified: ${p.classification}`, 'system');
+    }
+    if (p.type === 'classification_shift') {
+      app._classification = p.to;
+      showArrivalChip(p.to);
+      app.dashboard.addLogEntry(`Classification shifted: ${p.from} → ${p.to}`, 'decision');
+    }
+    if (p.type === 'baseline_extended') {
+      app.dashboard.addLogEntry(`Baseline extended (${p.extension}) — ${p.reason}`, 'system');
+    }
+  });
+
+  // CvB indicator: live coherence vs baseline per spec §5.
+  bus.subscribe('Aetheria_Coherence', (p) => {
+    updateCvbIndicator(p);
   });
 
   // Initialize coherence panel
@@ -162,6 +187,9 @@ async function init() {
 
   // Wire up data flow monitor
   initDataFlowMonitor();
+
+  // Arrival-state summary modal wiring
+  initArrivalSummaryButtons();
 
   // Wire up buttons
   document.getElementById('btn-connect-h10').addEventListener('click', connectH10);
@@ -308,6 +336,14 @@ async function toggleSession() {
   if (!app.sessionActive) {
     // Initialize audio on user gesture (required by Chrome)
     await app.delivery.init();
+
+    // Reset per-session state on shared singleton engines. The CoherenceEngine
+    // and FeatureEngine are created once at init(); without reset, z-scorer
+    // calibration from the previous session's baseline persists and distorts
+    // the new session's pre-calibration scores (symptom: GUT coherence stuck
+    // at ~0.05 with sd≈0.003 in session Joe-new-aetheria-session-2).
+    app.coherenceEngine.reset();
+    app.featureEngine.reset();
 
     // Start recording
     const sessionId = new Date().toISOString().slice(0, 10) + '_' + Date.now();
@@ -519,6 +555,138 @@ function initFrequencySelector() {
   container.appendChild(playBtn);
   container.appendChild(stopBtn);
   container.appendChild(hbBtn);
+}
+
+// --- Baseline UI (spec §5) ---
+
+const CLASSIFICATION_COPY = {
+  regulated_active: {
+    tagline: 'Your body is already regulating itself effectively.',
+    protocol: 'Protocol: Maintenance — minimal intervention.',
+  },
+  regulated_stable: {
+    tagline: 'You arrived calm and steady.',
+    protocol: 'Protocol: Reinforcement — gentle closing tones.',
+  },
+  mixed: {
+    tagline: 'Some regimes are regulated, one is lagging.',
+    protocol: 'Protocol: Targeted deficit work.',
+  },
+  dysregulated: {
+    tagline: 'Arriving with widespread low coherence — we\'ll start from the ground up.',
+    protocol: 'Protocol: Foundation — GUT grounding first.',
+  },
+  unstable: {
+    tagline: 'Signal variance is high — extending baseline.',
+    protocol: 'Protocol: Extended measurement; check sensor contact.',
+  },
+};
+
+function updateBaselineBannerPhase(phase) {
+  const banner = document.getElementById('baseline-banner');
+  if (!banner) return;
+  banner.classList.toggle('visible', phase === 'baseline');
+}
+
+function updateBaselineBanner(sessionInfo) {
+  if (sessionInfo.phase !== 'baseline') {
+    updateBaselineBannerPhase(sessionInfo.phase);
+    return;
+  }
+  const target = (app.policyConfig && app.policyConfig.baseline_duration_sec) || 90;
+  const remaining = Math.max(0, target - Math.floor(sessionInfo.stateTime || 0));
+  const el = document.getElementById('bb-countdown-value');
+  if (el) el.textContent = remaining;
+  updateBaselineBannerPhase('baseline');
+  // Signal quality pips: coarse assessment — green/amber/red per regime based
+  // on whether the coherence engine has a live sample and it's finite.
+  const coh = app.coherenceEngine?.latest;
+  const pipFor = (key) => {
+    const v = coh && coh[key];
+    if (v == null || !isFinite(v)) return 'sq-poor';
+    return 'sq-good';
+  };
+  const setPip = (id, cls) => {
+    const el2 = document.getElementById(id);
+    if (!el2) return;
+    el2.classList.remove('sq-good', 'sq-fair', 'sq-poor');
+    el2.classList.add(cls);
+  };
+  setPip('sq-pip-gut', pipFor('gut'));
+  setPip('sq-pip-heart', pipFor('heart'));
+  setPip('sq-pip-head', pipFor('head'));
+}
+
+function showArrivalChip(classification) {
+  const chip = document.getElementById('arrival-chip');
+  const val = document.getElementById('arrival-chip-value');
+  if (!chip || !val) return;
+  chip.className = 'arrival-chip visible c-' + classification;
+  val.textContent = classification.replace('_', ' ');
+}
+
+function showArrivalSummary(classification) {
+  const modal = document.getElementById('arrival-summary-modal');
+  const tag = document.getElementById('as-tagline');
+  const proto = document.getElementById('as-protocol');
+  if (!modal || !tag || !proto) return;
+  const copy = CLASSIFICATION_COPY[classification] || CLASSIFICATION_COPY.mixed;
+  tag.textContent = `Arrival state: ${classification.replace('_', ' ')} — ${copy.tagline}`;
+  proto.textContent = copy.protocol;
+  modal.classList.remove('hidden');
+}
+
+function hideArrivalSummary() {
+  const modal = document.getElementById('arrival-summary-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function updateCvbIndicator(coh) {
+  const ind = document.getElementById('cvb-indicator');
+  const lbl = document.getElementById('cvb-label');
+  if (!ind || !lbl) return;
+  const baseline = app._baselineStats;
+  if (!baseline || app._currentPhase !== 'prescription') {
+    ind.classList.remove('visible');
+    return;
+  }
+  // Use TCS-equivalent: average of per-regime deviations vs baseline mean.
+  const regimes = ['gut', 'heart', 'head'];
+  const BASELINE_KEY = { gut: 'GUT', heart: 'HEART', head: 'HEAD' };
+  let worst = 'green';
+  for (const r of regimes) {
+    const cur = coh[r];
+    const b = baseline[BASELINE_KEY[r]];
+    if (cur == null || !b) continue;
+    if (cur >= b.mean) continue;
+    if (cur >= b.mean - b.sd) { if (worst === 'green') worst = 'amber'; continue; }
+    worst = 'red';
+  }
+  ind.classList.remove('cvb-green', 'cvb-amber', 'cvb-red');
+  ind.classList.add('cvb-' + worst, 'visible');
+  lbl.textContent = 'CvB ' + worst.toUpperCase();
+}
+
+function initArrivalSummaryButtons() {
+  const acceptBtn = document.getElementById('btn-arrival-accept');
+  const overrideSel = document.getElementById('override-select');
+  if (acceptBtn) acceptBtn.addEventListener('click', hideArrivalSummary);
+  if (overrideSel) {
+    overrideSel.addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (!v || !app.policy) return;
+      app.policy._classification = v;
+      bus.publish('Aetheria_State', {
+        type: 'classification_shift',
+        from: app._classification,
+        to: v,
+        source: 'user_override',
+      });
+      app._classification = v;
+      showArrivalChip(v);
+      hideArrivalSummary();
+    });
+  }
 }
 
 // --- Boot ---

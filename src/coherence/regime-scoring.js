@@ -38,6 +38,20 @@ export class RegimeScorer {
   get calibrated() { return this._calibrated; }
 
   /**
+   * Reset all z-scorers and the calibrated flag. Call at the start of a new
+   * session so stale calibration from the prior session cannot distort the
+   * first samples before the new baseline's calibrate() runs.
+   *
+   * Bug discovered 2026-04-24 in session Joe-new-aetheria-session-2: the prior
+   * session's high-HRV baseline left z-scorers clipping this session's normal
+   * features at z=-4, producing sigmoid(~-3)≈0.045 with near-zero SD for GUT.
+   */
+  reset() {
+    for (const scorer of Object.values(this._zScorers)) scorer.reset();
+    this._calibrated = false;
+  }
+
+  /**
    * Calibrate z-scorers from baseline feature history.
    * Called at end of BASELINE state with arrays of feature values
    * collected over the 90-second baseline window.
