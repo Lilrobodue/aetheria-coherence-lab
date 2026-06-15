@@ -59,6 +59,10 @@ export function buildTaggerExport(fullSessionJSON) {
   const closingType = state.some(s => s.to === 'CLOSING')
     ? 'graceful' : 'user_stopped';
 
+  // Interval analysis (shared IntervalAnalysis module). Attached by main.js
+  // before export; absent on sessions recorded before this feature, so guard.
+  const ia = fullSessionJSON.intervalAnalysis || null;
+
   return {
     aetheria_export_version: '1.0',
     export_type: 'session_summary_for_tagger',
@@ -94,8 +98,23 @@ export function buildTaggerExport(fullSessionJSON) {
       harm_mean: +harmMean.toFixed(3),
       cascade_flips: cascadeFlips,
       prescriptions_count: prescriptionsCount,
-      closing_type: closingType
+      closing_type: closingType,
+
+      // Interval analysis summary (null on pre-feature sessions). The cascade
+      // score reflects the harmonic structure of the frequencies actually
+      // delivered; the library score is the static 27-position reference.
+      interval_coherence_score: ia ? ia.cascade.coherenceScore : null,
+      interval_classification: ia ? ia.cascade.classification : null,
+      interval_ratio_369: ia ? ia.cascade.ratio369 : null,
+      interval_dominant_regime: ia ? ia.cascade.dominantRegime : null,
+      interval_library_score: ia ? ia.library.coherenceScore : null,
+      duration_minutes: ia ? ia.duration.actualMinutes : null,
+      duration_protocol_met: ia ? ia.duration.met : null,
+      duration_protocol_status: ia ? ia.duration.status : null
     },
+
+    // Full interval-analysis block (null on pre-feature sessions).
+    interval_analysis: ia,
 
     // Calibrated 2026-04-17 after session analysis: bcs_value and
     // bcs_shared_energy may contain JSON null for ticks where MEMD could

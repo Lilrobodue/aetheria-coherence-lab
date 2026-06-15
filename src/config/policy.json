@@ -36,6 +36,12 @@
   "plateau_duration_low_sec": 30,
   "plateau_duration_high_sec": 15,
   "session_max_duration_sec": 900,
+  "session_min_duration_sec": 900,
+  "regime_protocol_sec": {
+    "GUT":   { "min": 2400, "optimal": 2700 },
+    "HEART": { "min": 1500, "optimal": 1800 },
+    "HEAD":  { "min": 900,  "optimal": 1200 }
+  },
   "goal_tcs_threshold": 80,
   "goal_sustain_duration_sec": 60,
   "success_min_duration_sec": 360,

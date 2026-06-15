@@ -850,9 +850,16 @@ export class PolicyEngine {
       if (this._tcsMaxInState > this._sessionMaxTcs) {
         this._sessionMaxTcs = this._tcsMaxInState;
       }
-      if (this._checkUnifiedCoherence()) return;
-      if (this._checkSustainedPeak()) return;
-      if (this._checkStagnation()) return;
+      // Minimum-dose floor (multi-app update): the convergence closers —
+      // including the sustaining-mode bypass inside them — may not end the
+      // session before the target regime's protocol minimum has elapsed.
+      // Bookkeeping above still runs so the close evaluates correctly once the
+      // floor is met.
+      if (this._minDoseElapsed()) {
+        if (this._checkUnifiedCoherence()) return;
+        if (this._checkSustainedPeak()) return;
+        if (this._checkStagnation()) return;
+      }
     }
 
     if (result.decision === 'HOLD') {
@@ -1014,21 +1021,51 @@ export class PolicyEngine {
     return true;
   }
 
+  // Duration protocol for the active target regime (multi-app update spec).
+  // Returns { min, optimal } in seconds, mirroring DURATION_PROTOCOL: the body
+  // needs a minimum therapeutic dose before any automatic close, and a
+  // non-converging session runs to the regime's optimal before the cap fires.
+  // Falls back to flat session_min/max when no target regime is set.
+  _regimeProtocol() {
+    const tbl = this.config.regime_protocol_sec || {};
+    const def = {
+      min: this.config.session_min_duration_sec ?? 900,
+      optimal: this.config.session_max_duration_sec ?? 1800,
+    };
+    const r = this._targetRegime;
+    if (r && tbl[r]) {
+      return { min: tbl[r].min ?? def.min, optimal: tbl[r].optimal ?? def.optimal };
+    }
+    return def;
+  }
+
+  // Minimum-dose floor: has the session run at least the target regime's
+  // protocol minimum? No automatic close (goal, sustained-peak, unified,
+  // stagnation, cap) may fire before this is true.
+  _minDoseElapsed() {
+    return this.sessionDuration >= this._regimeProtocol().min;
+  }
+
   _checkTermination(V) {
-    // Calibrated 2026-04-17 after session analysis: time cap halved to 15 min as a safety net, not a target. In a healthy session the sustained-peak or stagnation rule should fire first.
-    const maxDuration = this.config.session_max_duration_sec || 900;
+    // Minimum-dose floor (multi-app update): the time cap and goal-reached
+    // closers are gated behind the target regime's protocol. A non-converging
+    // session now runs to the regime OPTIMAL (e.g. HEART 30 min) instead of a
+    // flat 15-min net that cut HEART/GUT sessions short of their minimum dose.
+    const proto = this._regimeProtocol();
+    const maxDuration = proto.optimal;
     const goalTcs = this.config.goal_tcs_threshold || 80;
     const goalSustain = this.config.goal_sustain_duration_sec || 60;
 
-    // Time cap (safety net)
+    // Cap: the non-converging "proper dose reached" endpoint (regime optimal).
     if (this.sessionDuration >= maxDuration) {
-      console.warn(`[policy] time-cap safety net fired at ${maxDuration}s — neither CLOSE_ON_SUSTAINED_PEAK nor CLOSE_ON_STAGNATION triggered; session did not converge.`);
-      this._enterClosing('Time cap reached (safety net)');
+      console.warn(`[policy] duration cap fired at ${maxDuration}s (${this._targetRegime || 'no-regime'} protocol optimal) — session did not converge; closing at full dose.`);
+      this._enterClosing(`Protocol optimal reached (${this._targetRegime || 'session'} ${maxDuration}s) — full dose delivered`);
       return true;
     }
 
-    // Goal reached: TCS >= 80 sustained for 60s
-    if (V.tcs >= goalTcs) {
+    // Goal reached: TCS >= 80 sustained for 60s — but never before the regime
+    // minimum dose has elapsed.
+    if (this._minDoseElapsed() && V.tcs >= goalTcs) {
       if (!this._goalSustainStart) this._goalSustainStart = performance.now() / 1000;
       if ((performance.now() / 1000 - this._goalSustainStart) >= goalSustain) {
         this._enterClosing(`Goal reached: TCS ≥ ${goalTcs} sustained for ${goalSustain}s`);

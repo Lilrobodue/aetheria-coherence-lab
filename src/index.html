@@ -592,6 +592,79 @@
     @media (max-width: 360px) {
       #links-modal .sim-grid { grid-template-columns: 1fr; }
     }
+
+    /* ===== Interval Analysis Lab ===== */
+    #interval-lab-modal .modal-content { line-height: 1.6; }
+    .il-tabs .il-tab { font-size: 12px; }
+    .il-divider { height: 1px; background: var(--border); margin: 28px 0 4px; }
+    .il-section-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+      color: var(--text-dim); margin: 18px 0 8px;
+    }
+    .il-empty {
+      font-size: 12px; color: var(--text-dim); font-style: italic;
+      padding: 12px; border: 1px dashed var(--border); border-radius: 6px;
+      text-align: center; margin: 8px 0;
+    }
+    .il-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+    .il-card {
+      flex: 1 1 130px; background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 10px 12px;
+    }
+    .il-card-label {
+      font-size: 9px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text-dim); margin-bottom: 4px;
+    }
+    .il-bignum { font-size: 22px; font-weight: bold; color: var(--text-primary); }
+    .il-scorebar {
+      position: relative; height: 22px; background: rgba(255,255,255,0.06);
+      border-radius: 4px; overflow: hidden;
+    }
+    .il-scorebar-fill {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: linear-gradient(90deg, #7c4dff, #00e676); border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+    .il-scorebar-num {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      font-weight: bold; font-size: 13px; color: #fff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .il-gauge { display: flex; align-items: center; gap: 8px; }
+    .il-gauge-track {
+      flex: 1; height: 8px; background: rgba(255,255,255,0.06);
+      border-radius: 4px; overflow: hidden;
+    }
+    .il-gauge-fill { height: 100%; border-radius: 4px; }
+    .il-bd-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 11px; }
+    .il-bd-label { flex: 0 0 150px; color: var(--text-secondary); }
+    .il-bd-bar { flex: 1; height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; }
+    .il-bd-bar span { display: block; height: 100%; border-radius: 4px; }
+    .il-bd-val { flex: 0 0 64px; text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .il-canvas { width: 100%; display: block; margin: 6px 0; background: #1a1a2e; border-radius: 6px; }
+    .il-legend {
+      display: flex; flex-wrap: wrap; gap: 12px; font-size: 10px;
+      color: var(--text-secondary); margin: 4px 0 8px;
+    }
+    .il-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
+    .il-table-scroll { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+    .il-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .il-tbl th, .il-tbl td { padding: 3px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+    .il-tbl th { position: sticky; top: 0; background: var(--bg-secondary); color: var(--text-dim); font-weight: normal; }
+    .il-tbl td { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+    .il-cmp-inputs { display: flex; gap: 12px; flex-wrap: wrap; }
+    .il-file {
+      display: inline-flex; flex-direction: column; gap: 4px; font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .il-file input[type=file] { font-size: 10px; color: var(--text-dim); }
+    .il-cmp-row {
+      display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+      font-size: 11px; padding: 6px 4px; border-bottom: 1px solid var(--border);
+    }
+    .il-cmp-row b { color: var(--text-primary); }
+    .il-cmp-name { color: var(--text-dim); flex: 1 1 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .il-cmp-delta { background: rgba(124,77,255,0.08); border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -916,6 +989,7 @@
     <div class="header-title">Aetheria Coherence Lab</div>
     <div class="header-controls">
       <button id="btn-links" class="btn btn-guide" title="Links & Resources">&#9741;</button>
+      <button id="btn-intervals" class="btn btn-guide" title="Interval Analysis Lab">&#8767;</button>
       <button id="btn-guide" class="btn btn-guide" title="Getting Started Guide">?</button>
       <button id="btn-connect-h10" class="btn btn-connect">Connect H10</button>
       <button id="btn-connect-muse" class="btn btn-connect">Connect Muse</button>
@@ -1110,6 +1184,8 @@
   })();
 </script>
 <script src="lib/athena-core.js"></script>
+<script src="lib/interval-analysis.js"></script>
+<script src="lib/prescription-engine.js"></script>
 <script type="module" src="main.js"></script>
 <script>
   window.addEventListener('load', () => {

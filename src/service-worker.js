@@ -1,6 +1,6 @@
 // Aetheria Coherence Lab — Service Worker
 // Cache-first for modules/assets, network-first for HTML
-const CACHE_NAME = 'aetheria-v27';
+const CACHE_NAME = 'aetheria-v29';
 
 const APP_SHELL = [
   './',
@@ -8,6 +8,8 @@ const APP_SHELL = [
   './main.js',
   './manifest.webmanifest',
   './lib/athena-core.js',
+  './lib/interval-analysis.js',
+  './lib/prescription-engine.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   // streams
@@ -36,6 +38,7 @@ const APP_SHELL = [
   './coherence/coherence-vector.js',
   './coherence/tcs.js',
   './coherence/cross-regime.js',
+  './coherence/interval-session.js',
   // bcs
   './bcs/kuramoto.js',
   './bcs/mutual-information.js',
@@ -67,6 +70,7 @@ const APP_SHELL = [
   './viz/coherence-panel.js',
   './viz/signal-panel.js',
   './viz/plot-base.js',
+  './viz/interval-lab.js',
 ];
 
 // --- Install: pre-cache the app shell ---

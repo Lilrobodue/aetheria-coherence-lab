@@ -18,6 +18,8 @@ import { BCSEngine } from './bcs/bcs-engine.js';
 import { SessionRecorder } from './recording/session-recorder.js';
 import { generateReport } from './recording/session-report.js';
 import { buildTaggerExport, TAGGER_URL } from './recording/tagger-export.js';
+import { IntervalLab } from './viz/interval-lab.js';
+import { analyzeSession, buildIntervalExport } from './coherence/interval-session.js';
 
 // Global app state
 const health = new SensorHealthMonitor(bus);
@@ -39,6 +41,8 @@ const app = {
   frequencies: null,
   coherencePanel: null,
   dashboard: null,
+  intervalLab: null,
+  lastSession: null,
   sessionActive: false
 };
 
@@ -181,6 +185,11 @@ async function init() {
   // Initialize dashboard (log, status, session info)
   app.dashboard = new LiveDashboard(bus);
   app.dashboard.init();
+
+  // Initialize the Interval Analysis Lab (shared IntervalAnalysis module).
+  // The lib is loaded as a classic <script> before this module, so it lives on
+  // window. Validate both shared engines on boot via their self-tests.
+  initIntervalLab();
 
   // Wire up live metrics from bus
   initLiveMetrics();
@@ -372,6 +381,13 @@ async function toggleSession() {
     if (app.recorder) {
       app.recorder.stop();
       const sessionData = app.recorder.toJSON();
+
+      // Interval analysis (shared module): score the delivered cascade and the
+      // full 27-frequency library, then attach to the session so it rides along
+      // in both the full export and the tagger export.
+      attachIntervalAnalysis(sessionData);
+      app.lastSession = sessionData;
+
       const report = generateReport(sessionData);
 
       app.dashboard.addLogEntry(
@@ -380,6 +396,16 @@ async function toggleSession() {
         `${report.advances} advances, ${report.pivots} pivots`,
         'system'
       );
+
+      const ia = sessionData.intervalAnalysis;
+      if (ia) {
+        app.dashboard.addLogEntry(
+          `Interval coherence: cascade ${ia.cascade.coherenceScore} (${ia.cascade.classification}), ` +
+          `3-6-9 ${(ia.cascade.ratio369 * 100).toFixed(0)}% · library ${ia.library.coherenceScore} · ` +
+          `duration ${ia.duration.actualMinutes} min (${ia.duration.status})`,
+          'system'
+        );
+      }
 
       console.log('Session report:', report);
       showSessionComplete(sessionData);
@@ -391,6 +417,19 @@ async function toggleSession() {
     btn.style.borderColor = '';
     btn.style.color = '';
     app.dashboard.addLogEntry('Session stopped by user', 'system');
+  }
+}
+
+// --- Interval analysis attach (shared module) ---
+
+function attachIntervalAnalysis(sessionData) {
+  const IA = window.IntervalAnalysis;
+  if (!IA) return;
+  try {
+    const analysis = analyzeSession(sessionData, IA, app.frequencies || []);
+    sessionData.intervalAnalysis = buildIntervalExport(analysis);
+  } catch (e) {
+    console.warn('[IntervalAnalysis] failed to attach:', e);
   }
 }
 
@@ -486,6 +525,46 @@ function initDataFlowMonitor() {
     }
     flowEl.innerHTML = parts.join(' &middot; ');
   }, 1000);
+}
+
+// --- Interval Analysis Lab (shared IntervalAnalysis module) ---
+
+function initIntervalLab() {
+  const IA = window.IntervalAnalysis;
+  const btn = document.getElementById('btn-intervals');
+
+  if (!IA) {
+    // Shared lib failed to load — hide the entry point rather than 500 on click.
+    if (btn) btn.style.display = 'none';
+    console.warn('[IntervalLab] window.IntervalAnalysis not found — lab disabled');
+    return;
+  }
+
+  // Validate both shared engines (spec Phase 1 / cross-app consistency).
+  try {
+    const ia = IA.selfTest();
+    const msg = `Interval module self-test: ${ia.passed}/${ia.total} passed`;
+    app.dashboard.addLogEntry(msg, ia.failed ? 'error' : 'system');
+    if (window.PrescriptionEngine) {
+      const pe = window.PrescriptionEngine.selfTest();
+      app.dashboard.addLogEntry(
+        `Prescription engine self-test: ${pe.passed}/${pe.total} passed`,
+        pe.failed ? 'error' : 'system'
+      );
+    }
+  } catch (e) {
+    console.warn('[IntervalLab] self-test error:', e);
+  }
+
+  app.intervalLab = new IntervalLab({
+    IA,
+    PE: window.PrescriptionEngine,
+    getFrequencies: () => app.frequencies || [],
+    getLastSession: () => app.lastSession,
+  });
+  app.intervalLab.mount();
+
+  if (btn) btn.addEventListener('click', () => app.intervalLab.open());
 }
 
 // --- Frequency Selector (Phase 4: manual delivery test) ---

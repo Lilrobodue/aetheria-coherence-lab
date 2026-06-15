@@ -77,6 +77,8 @@ export function generateReport(sessionJson) {
     startTime: metadata.startTime,
     endTime: metadata.endTime,
     durationSec: +duration.toFixed(0),
+    // Interval analysis (shared module) — present when attached before report.
+    intervalAnalysis: sessionJson.intervalAnalysis || null,
     baselineTcs: +baselineTcs.toFixed(1),
     finalTcs: +finalTcs.toFixed(1),
     peakTcs: +peakTcs.toFixed(1),

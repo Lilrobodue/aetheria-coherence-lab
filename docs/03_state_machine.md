@@ -329,13 +329,24 @@ Every numeric threshold above (15, 70, 50, 10, 0.1, etc.) is a config value load
 
 ## 5. Termination Conditions (path to CLOSING)
 
-The active session ends and the biofield hug begins when **any** of the following is true:
+**Minimum-dose floor (multi-app update):** no *automatic* close — goal, sustained-peak, unified-coherence, stagnation, or the duration cap — may fire before the active target regime has had its protocol **minimum** dose. This mirrors `DURATION_PROTOCOL` so dense tissue gets sustained exposure:
 
-1. **Time cap:** session duration ≥ configured max (default 30 min)
-2. **Goal reached:** TCS ≥ 80 sustained for 60 s
-3. **User stop:** explicit stop command
-4. **Diminishing returns:** 3 consecutive PIVOTS with no TCS improvement → system concludes today is not the day, fades out gracefully
-5. **Sensor failure:** contact quality drops below threshold and doesn't recover within 30 s
+| Target regime | Minimum (no close before) | Optimal (cap for a non-converging session) |
+|---------------|---------------------------|--------------------------------------------|
+| HEAD          | 15 min                    | 20 min                                     |
+| HEART         | 25 min                    | 30 min                                     |
+| GUT           | 40 min                    | 45 min                                     |
+
+Configured in `policy.json` under `regime_protocol_sec` (seconds); `session_min_duration_sec` / `session_max_duration_sec` are the fallback when no target regime is set. **User stop is never gated** — the user can end any session at any time.
+
+Once past the minimum dose, the active session ends and the biofield hug begins when **any** of the following is true:
+
+1. **Goal reached:** TCS ≥ 80 sustained for 60 s
+2. **Convergence:** sustained-peak / unified-coherence / stagnation closers fire
+3. **Duration cap:** session reaches the target regime's protocol optimal (a non-converging session closes at full dose rather than running forever)
+4. **User stop:** explicit stop command (not gated by the minimum-dose floor)
+5. **Diminishing returns:** consecutive PIVOTS with no TCS improvement → system concludes today is not the day, fades out gracefully
+6. **Sensor failure:** contact quality drops below threshold and doesn't recover within 30 s
 
 ---
 
