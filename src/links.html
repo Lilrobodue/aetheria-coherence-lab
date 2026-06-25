@@ -45,6 +45,9 @@ h1{font-size:32px;font-weight:300;color:var(--gld);letter-spacing:.15em;margin-b
 .link:active{transform:translateY(0)}
 .link::after{content:'\2197';position:absolute;right:16px;color:var(--dim);font-size:14px;transition:all .25s}
 .link:hover::after{color:var(--gld);right:12px}
+.link-disabled{cursor:default;opacity:.6}
+.link-disabled:hover{border-color:var(--bdr);transform:none;box-shadow:none}
+.link-disabled::after,.link-disabled:hover::after{content:none}
 
 .link-icon{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
 .link-text h3{font-size:14px;font-weight:500;letter-spacing:.03em;margin-bottom:1px}
@@ -149,13 +152,13 @@ h1{font-size:32px;font-weight:300;color:var(--gld);letter-spacing:.15em;margin-b
     </div>
   </a>
 
-  <a class="link" href="https://a.co/d/0c83ZGEu" target="_blank">
+  <div class="link link-disabled">
     <div class="link-icon ic-blu">&#128218;</div>
     <div class="link-text">
-      <h3>The Golden Thread</h3>
-      <p>One equation across all scales &mdash; E=hf as universal key</p>
+      <h3>Aetheria: The Science</h3>
+      <p>Coming soon &mdash; currently in editing</p>
     </div>
-  </a>
+  </div>
 
   <a class="link" href="https://a.co/d/0ckEN0Qs" target="_blank">
     <div class="link-icon ic-ora">&#128213;</div>
@@ -188,6 +191,11 @@ h1{font-size:32px;font-weight:300;color:var(--gld);letter-spacing:.15em;margin-b
   <div class="section-label">Interactive Simulations</div>
 
   <div class="sim-grid">
+    <a class="sim-card" href="https://big-banana-studios.github.io/aetheria-voxel/" target="_blank">
+      <div class="sim-icon">&#129482;</div>
+      <h3>Resonance of the Spheres</h3>
+      <p>Voxel meditation PWA &middot; Muse S, Athena &amp; Polar H10</p>
+    </a>
     <a class="sim-card" href="https://lilrobodue.github.io/Lewis-Vortex-Model/" target="_blank">
       <div class="sim-icon">&#127744;</div>
       <h3>Lewis Vortex Model</h3>
