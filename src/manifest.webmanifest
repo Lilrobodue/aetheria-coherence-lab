@@ -1,6 +1,6 @@
 {
   "name": "Aetheria Coherence Lab",
-  "short_name": "Aetheria",
+  "short_name": "Coherence Lab",
   "description": "Adaptive closed-loop biofield coherence instrument",
   "start_url": "./index.html",
   "display": "standalone",
